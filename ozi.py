@@ -17,6 +17,7 @@ class _EqClass:
         self.value = None
 
     def __repr__(self):
+        """Get a string representation for printing this equivalence class."""
         return f"{{value: {self.value}, vars: {self.vars}}}"
 
     def is_bound(self):
@@ -24,17 +25,22 @@ class _EqClass:
         return self.value is not None
 
     def get_refs(self):
-        """Get the list of all variables/values in this equivalence class."""
+        """Get the set of all variables/values in this equivalence class."""
         if self.value is None:
             return self.vars
         else:
             return self.vars.union({self.value})
 
     def merge(self, other):
-        """Merge this equivalence class (in-place) with another."""
-        if self.value is None:
+        """Merge this equivalence class (in-place) with another.
+
+        NOTE: This does not affect the other equivalence class.
+        """
+        if not self.is_bound():
+            # If the other class is bound, then this take its value, else it
+            # stays unbound (as the other class's value is None)
             self.value = other.value
-        elif other.value is not None and self.value != other.value:
+        elif not other.is_bound() and self.value != other.value:
             raise UnificationError
         self.vars = self.vars.union(other.vars)
 
@@ -51,12 +57,15 @@ class _Value:
         """Perform unification on values."""
         if not isinstance(other, self.__class__):
             return False
+
         elif self.kind != other.kind() or self.kind == "proc":
             return False
+
         elif self.kind == "record":
             # TODO: Recursive unification
             return False
-        else:
+
+        else:  # numeric values
             return self.val == other.val
 
 
@@ -64,17 +73,16 @@ class Interpreter:
     """The Oz interpreter."""
 
     def __init__(self):
-        """Initialize the semantic stack and single-assignment store."""
+        """Initialize the single-assignment store."""
         self.sas = {}
-        self.stack = []
 
     # TODO: Run Oz operations on Oz "values"
     def _compute(self, value):
         """Compute the actual value of the given Oz "value"."""
-        # TODO: This should return an instance of _Value
+        # NOTE: This should return an instance of _Value
         return value
 
-    # TODO:
+    # TODO: Complete for all statement types
     def _get_free_vars(self, stmt):
         """Get the free variables for the given statement."""
         if stmt[0] == "nop":
@@ -98,6 +106,7 @@ class Interpreter:
                     fvars.add(oper)
 
         elif isinstance(stmt, _Value):
+            # TODO: Handle Oz values/operations
             raise NotImplementedError
 
         else:
@@ -109,34 +118,38 @@ class Interpreter:
         if class1 is not class2:
             class1.merge(class2)
             for ref in class2.get_refs():
+                # All variables/values that map to the second equivalence class
+                # are to now be pointed to the merged equivalence class
                 self.sas[ref] = class1
             del class2
 
     def _unify(self, env, lhs, rhs):
         """Unify both input variables/values."""
-        if lhs[0] == "ident" and rhs[0] == "ident":
+        if lhs[0] == "ident" and rhs[0] == "ident":  # <x> = <y>
             class1 = self.sas[env[lhs]]
             class2 = self.sas[env[rhs]]
             self._merge_classes(class1, class2)
 
-        elif lhs[0] == "ident" or rhs[0] == "ident":
+        elif lhs[0] == "ident" or rhs[0] == "ident":  # <x> = <v>
             if lhs[0] == "ident":
-                var, val = lhs, rhs
+                var, value = lhs, rhs
             else:
-                var, val = rhs, lhs
+                var, value = rhs, lhs
 
-            val = self._compute(val)
+            # TODO: Handle records
+            value = self._compute(value)
             class1 = self.sas[env[var]]
 
-            if class1.value is None:
-                if val in self.sas:
-                    class2 = self.sas[val]
+            if not class1.is_bound():
+                if value in self.sas:
+                    class2 = self.sas[value]
                     self._merge_classes(class1, class2)
                 else:
-                    class1.value = val
-                    self.sas[val] = class1
+                    class1.value = value
+                    # TODO: Choose hashable key for value
+                    self.sas[value] = class1
 
-            elif class1.value != val:
+            elif class1.value != value:
                 raise UnificationError
 
         else:
@@ -146,6 +159,8 @@ class Interpreter:
     def _alloc_var(self, length=16):
         """Allocate a variable on the single-assignment store and return it."""
         while True:
+            # Choose a random string made of ASCII alphanumeric characters of a
+            # certain length
             new = "".join(
                 random.choices(string.ascii_letters + string.digits, k=length)
             )
@@ -157,11 +172,12 @@ class Interpreter:
         """Run the given Oz AST."""
         self.sas = {}  # clear the interpreter
         # Initialize with empty environments
-        self.stack = [(stmt, {}) for stmt in reversed(ast)]
+        stack = [(stmt, {}) for stmt in reversed(ast)]
 
         # TODO:
-        while len(self.stack) > 0:
-            stmt, env = self.stack.pop()
+        while len(stack) > 0:
+            stmt, env = stack.pop()
+
             if stmt[0] == "nop":
                 logging.info("skip statement")
 
@@ -170,7 +186,7 @@ class Interpreter:
                     f"combined statement with {len(stmt)} sub-statements"
                 )
                 for sub_stmt in reversed(stmt):
-                    self.stack.append((sub_stmt, env))
+                    stack.append((sub_stmt, env))
 
             elif stmt[0] == "var":
                 logging.info(f"local statement with var: {stmt[1][1]}")
@@ -178,7 +194,7 @@ class Interpreter:
                 env[stmt[1]] = new
                 logging.debug(f"env: {env}")
                 logging.debug(f"sas: {self.sas}")
-                self.stack.append((stmt[2], env))
+                stack.append((stmt[2], env))
 
             elif stmt[0] == "bind":
                 logging.info(f"binding lhs: {stmt[1]} & rhs: {stmt[2]}")
