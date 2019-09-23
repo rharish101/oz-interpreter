@@ -6,39 +6,55 @@ from sys import stderr
 
 from ozi import Interpreter
 
+# TODO: Create a parser for the Oz input syntax
 INPUT = [
     [
         "var",
         ("ident", "x"),
         [
-            "var",
-            ("ident", "y"),
             [
+                "var",
+                ("ident", "y"),
+                [
+                    [
+                        "bind",
+                        ("ident", "x"),
+                        (
+                            "record",
+                            ("literal", "|"),
+                            [
+                                (("literal", 1), ("literal", 1)),
+                                (("literal", 2), ("ident", "y")),
+                            ],
+                        ),
+                    ],
+                    [
+                        "bind",
+                        ("ident", "y"),
+                        (
+                            "record",
+                            ("literal", "|"),
+                            [
+                                (("literal", 1), ("literal", 1)),
+                                (("literal", 2), ("ident", "x")),
+                            ],
+                        ),
+                    ],
+                    ["bind", ("ident", "x"), ("ident", "y")],
+                ],
+            ],
+            [
+                "var",
+                ("ident", "f"),
                 [
                     "bind",
-                    ("ident", "x"),
+                    ("ident", "f"),
                     (
-                        "record",
-                        ("literal", "|"),
-                        [
-                            (("literal", 1), ("literal", 1)),
-                            (("literal", 2), ("ident", "y")),
-                        ],
+                        "proc",
+                        [("ident", "y")],
+                        ["bind", ("ident", "x"), ("ident", "y")],
                     ),
                 ],
-                [
-                    "bind",
-                    ("ident", "y"),
-                    (
-                        "record",
-                        ("literal", "|"),
-                        [
-                            (("literal", 1), ("literal", 1)),
-                            (("literal", 2), ("ident", "x")),
-                        ],
-                    ),
-                ],
-                ["bind", ("ident", "x"), ("ident", "y")],
             ],
         ],
     ]

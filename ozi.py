@@ -2,6 +2,8 @@
 import logging
 import random
 import string
+from copy import deepcopy
+from pprint import pformat
 
 
 class UnificationError(Exception):
@@ -32,43 +34,96 @@ class Interpreter:
         """Initialize the single-assignment store."""
         self.sas = {}
 
-    # TODO: Run Oz operations on Oz "values"
-    def _compute(self, value):
+    # TODO: Run Oz operations
+    def _compute(self, env, value):
         """Compute the actual value of the given Oz "value"."""
-        return value
+        if value[0] in {"literal", "variable"}:
+            return value
 
-    # TODO: Complete for all statement types and Oz values/operations
-    def _get_free_vars(self, stmt):
-        """Get the free variables for the given statement."""
+        elif value[0] == "ident":
+            # Storing record values in the SAS which have variables inside them
+            # should store the environment-mapped SAS variable instead of the
+            # Oz identifier.
+            return ("variable", env[value[1]])
+
+        elif value[0] == "record":
+            return (
+                "record",
+                value[1],
+                [(feat, self._compute(env, val)) for feat, val in value[2]],
+            )
+
+        elif value[0] == "proc":
+            fvars = self._get_fvars_value(value)
+            ctx_env = {fvar: env[fvar] for fvar in fvars}
+            return ("proc", value[1], value[2], ctx_env)
+
+        else:  # Oz operations
+            raise NotImplementedError
+
+    # TODO: Complete for Oz operations
+    def _get_fvars_value(self, value):
+        """Get the free variables of an Oz variable or value/operation.
+
+        NOTE: The input must not have been "computed" using `_compute`, as free
+        variables of Oz operations are lost on computation.
+        """
+        if value[0] == "ident":
+            fvars = {value[1]}
+
+        elif value[0] == "literal":
+            fvars = set()
+
+        elif value[0] == "record":
+            fvars = set()
+            for _, sub_val in value[2]:
+                fvars = fvars.union(self._get_fvars_value(sub_val))
+
+        elif value[0] == "proc":
+            args = {arg for _, arg in value[1]}
+            fvars = self._get_fvars(value[2])
+            fvars.difference_update(args)
+
+        else:  # Oz operation
+            raise NotImplementedError
+
+        return fvars
+
+    # TODO: Complete for all statement types
+    def _get_fvars(self, stmt):
+        """Get the free variables of the given statement."""
         if stmt[0] == "nop":
             fvars = set()
 
         elif type(stmt[0]) is list:
-            fvars = self._get_free_vars(stmt[0])
-            for sub_stmt in stmt[1:]:
-                fvars = fvars.union(self._get_free_vars(sub_stmt))
+            fvars = set()
+            for sub_stmt in stmt:
+                fvars = fvars.union(self._get_fvars(sub_stmt))
 
         elif stmt[0] == "var":
-            fvars = self._get_free_vars(stmt[2])
-            fvars.remove(stmt[1])
+            fvars = self._get_fvars(stmt[2])
+            fvars.remove(stmt[1][1])
 
         elif stmt[0] == "bind":
             fvars = set()
             for oper in stmt[1:]:
-                if oper[0] == "ident":
-                    fvars.add(oper[1])
-                else:
-                    fvars = fvars.union(self._get_free_vars(oper))
+                fvars = fvars.union(self._get_fvars_value(oper))
 
         else:
+            print(stmt)
             raise NotImplementedError
 
         return fvars
 
     def _unify_vars(self, env, lhs, rhs):
         """Unify two variables."""
-        class1 = self.sas[env[lhs[1]]]
-        class2 = self.sas[env[rhs[1]]]
+        eq_classes = []
+        for oper in [lhs, rhs]:
+            if oper[0] == "ident":
+                eq_classes.append(self.sas[env[oper[1]]])
+            else:  # SAS variable
+                eq_classes.append(self.sas[oper[1]])
+        class1, class2 = eq_classes
 
         if class1 is not class2:
             # Flag for unifying values after merging equivalence classes.
@@ -96,8 +151,8 @@ class Interpreter:
 
     def _unify_values(self, env, lhs, rhs):
         """Unify two Oz values."""
-        lhs = self._compute(lhs)
-        rhs = self._compute(rhs)
+        lhs = self._compute(env, lhs)
+        rhs = self._compute(env, rhs)
 
         if (
             lhs[0] != rhs[0]
@@ -141,7 +196,7 @@ class Interpreter:
             else:
                 var, value = rhs[1], lhs
 
-            value = self._compute(value)
+            value = self._compute(env, value)
             class1 = self.sas[env[var]]
 
             if not class1.is_bound():
@@ -187,17 +242,20 @@ class Interpreter:
             elif stmt[0] == "var":
                 logging.info(f"local statement with var: {stmt[1][1]}")
                 new = self._alloc_var()
-                env[stmt[1][1]] = new
-                logging.debug(f"env: {env}")
-                logging.debug(f"sas: {self.sas}")
-                stack.append((stmt[2], env))
+
+                # Avoid editing environments of other statements in the stack
+                new_env = deepcopy(env)
+                new_env[stmt[1][1]] = new
+
+                logging.debug(f"new env: {pformat(new_env)}")
+                logging.debug(f"sas: {pformat(self.sas)}")
+                stack.append((stmt[2], new_env))
 
             elif stmt[0] == "bind":
                 logging.info(f"binding lhs: {stmt[1]} & rhs: {stmt[2]}")
-                logging.debug(f"env: {env}")
-                logging.debug(f"sas before: {self.sas}")
+                logging.debug(f"env: {pformat(env)}")
                 self._unify(env, stmt[1], stmt[2])
-                logging.debug(f"sas after: {self.sas}")
+                logging.debug(f"sas after: {pformat(self.sas)}")
 
             else:
                 raise NotImplementedError
