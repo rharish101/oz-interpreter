@@ -1,4 +1,5 @@
 """Interpreter for the Oz programming language."""
+import logging
 import random
 import string
 
@@ -14,6 +15,9 @@ class _EqClass:
         """Initialize the class with the given unbound variable."""
         self.vars = {var}
         self.value = None
+
+    def __repr__(self):
+        return f"{{value: {self.value}, vars: {self.vars}}}"
 
     def is_bound(self):
         """Return True if the variables in this class are bound to a value."""
@@ -68,8 +72,34 @@ class Interpreter:
         return value
 
     # TODO:
-    def _get_free_vars(self, ast):
-        """Get the free variables for the given statement AST."""
+    def _get_free_vars(self, stmt):
+        """Get the free variables for the given statement."""
+        if stmt[0] == "nop":
+            fvars = set()
+
+        elif type(stmt[0]) is list:
+            fvars = self._get_free_vars(stmt[0])
+            for sub_stmt in stmt[1:]:
+                fvars = fvars.union(self._get_free_vars(sub_stmt))
+
+        elif stmt[0] == "var":
+            fvars = self._get_free_vars(stmt[2])
+            fvars.remove(stmt[1])
+
+        elif stmt[0] == "bind":
+            fvars = set()
+            for oper in stmt[1:]:
+                if isinstance(oper, _Value):
+                    fvars = fvars.union(self._get_free_vars(oper))
+                else:
+                    fvars.add(oper)
+
+        elif isinstance(stmt, _Value):
+            raise NotImplementedError
+
+        else:
+            raise NotImplementedError
+        return fvars
 
     def _merge_classes(self, class1, class2):
         """Merge two equivalence classes."""
@@ -123,12 +153,29 @@ class Interpreter:
     def run(self, ast):
         """Run the given Oz AST."""
         self.sas = {}  # clear the interpreter
-        self.stack = ast[::-1]  # initialize the stack with the ast in reverse
+        # Initialize with empty environments
+        self.stack = [(stmt, {}) for stmt in reversed(ast)]
 
         # TODO:
         while len(self.stack) > 0:
-            stmt = self.stack.pop()
+            stmt, env = self.stack.pop()
             if stmt[0] == "nop":
-                continue
+                logging.info("skip statement")
+
+            elif type(stmt[0]) is list:
+                logging.info(
+                    f"combined statement with {len(stmt)} sub-statements"
+                )
+                for sub_stmt in reversed(stmt):
+                    self.stack.append((sub_stmt, env))
+
+            elif stmt[0] == "var":
+                logging.info(f"local statement with var: {stmt[1][1]}")
+                new = self._alloc_var()
+                env[stmt[1]] = new
+                logging.debug(f"env: {env}")
+                logging.debug(f"sas: {self.sas}")
+                self.stack.append((stmt[2], env))
+
             else:
                 raise NotImplementedError
