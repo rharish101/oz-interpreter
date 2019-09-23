@@ -65,45 +65,77 @@ class Interpreter:
 
         return fvars
 
-    def _merge_classes(self, class1, class2):
-        """Merge two equivalence classes."""
+    def _unify_vars(self, env, lhs, rhs):
+        """Unify two variables."""
+        class1 = self.sas[env[lhs[1]]]
+        class2 = self.sas[env[rhs[1]]]
+
         if class1 is not class2:
+            # Flag for unifying values after merging equivalence classes.
+            unify_vals = False
             if not class1.is_bound():
                 # If the class2 class is bound, then this take its value, else
-                # it stays unbound (as the class2 class's value is None)
+                # it stays unbound (as the class2 class's value is None).
                 class1.value = class2.value
-            elif class2.is_bound() and not self._equals(
-                class1.value, class2.value
-            ):
-                raise UnificationError
+            elif class2.is_bound():
+                # Both variables are bound, so in order to prevent infinite
+                # recursion in unification of record values, we need to unify
+                # their values after merging their equivalence classes, which
+                # marks the variables as unified.
+                unify_vals = True
             class1.vars = class1.vars.union(class2.vars)
 
             for ref in class2.vars:
                 # All variables that map to the second equivalence class are to
-                # be pointed to the merged equivalence class
+                # be pointed to the merged equivalence class.
                 self.sas[ref] = class1
+
+            if unify_vals:
+                self._unify_values(env, class1.value, class2.value)
             del class2
 
-    def _equals(self, lhs, rhs):
-        """Perform unification on values."""
-        if lhs[0] != rhs[0] or lhs[0] == "proc":
-            return False
+    def _unify_values(self, env, lhs, rhs):
+        """Unify two Oz values."""
+        lhs = self._compute(lhs)
+        rhs = self._compute(rhs)
+
+        if (
+            lhs[0] != rhs[0]
+            or lhs[0] == "proc"  # procedure values
+            or (lhs[0] == "literal" and lhs[1] != rhs[1])  # numeric values
+        ):
+            raise UnificationError
 
         elif lhs[0] == "record":
-            # TODO: Recursive unification
-            return False
+            if lhs[1] != rhs[1] or len(lhs[2]) != len(rhs[2]):
+                raise UnificationError
 
-        else:  # numeric values
-            return lhs[1] == rhs[1]
+            else:
+                # Save into a record for matching record features
+                # independent of the order of the feature declaration.
+                lhs_record = {}
+                rhs_record = {}
+                for item in lhs[2]:
+                    lhs_record[item[0]] = item[1]
+                for item in rhs[2]:
+                    rhs_record[item[0]] = item[1]
+
+                if lhs_record.keys() != rhs_record.keys():
+                    # Value returned by `dict.keys` acts like a set, so
+                    # order doesn't matter.
+                    raise UnificationError
+                else:
+                    for key in lhs_record:
+                        self._unify(env, lhs_record[key], rhs_record[key])
 
     def _unify(self, env, lhs, rhs):
         """Unify both input variables/values."""
         if lhs[0] == "ident" and rhs[0] == "ident":  # <x> = <y>
-            class1 = self.sas[env[lhs[1]]]
-            class2 = self.sas[env[rhs[1]]]
-            self._merge_classes(class1, class2)
+            self._unify_vars(env, lhs, rhs)
 
         elif lhs[0] == "ident" or rhs[0] == "ident":  # <x> = <v>
+            # Input can be either `<x> = <v>` or `<v> = <x>`, so convert it
+            # into `<x> = <v>`.
             if lhs[0] == "ident":
                 var, value = lhs[1], rhs
             else:
@@ -114,18 +146,17 @@ class Interpreter:
 
             if not class1.is_bound():
                 class1.value = value
-            elif not self._equals(class1.value, value):
-                raise UnificationError
+            else:
+                self._unify(env, class1.value, value)
 
-        else:
-            if not self._equals(self._compute(lhs), self._compute(rhs)):
-                raise UnificationError
+        else:  # <v> = <v>
+            self._unify_values(env, lhs, rhs)
 
     def _alloc_var(self, length=16):
         """Allocate a variable on the single-assignment store and return it."""
         while True:
             # Choose a random string made of ASCII alphanumeric characters of a
-            # certain length
+            # certain length.
             new = "".join(
                 random.choices(string.ascii_letters + string.digits, k=length)
             )

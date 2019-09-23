@@ -11,16 +11,35 @@ INPUT = [
         "var",
         ("ident", "x"),
         [
+            "var",
+            ("ident", "y"),
             [
-                "var",
-                ("ident", "y"),
                 [
-                    "var",
+                    "bind",
                     ("ident", "x"),
-                    ["bind", ("ident", "x"), ("ident", "y")],
+                    (
+                        "record",
+                        ("literal", "|"),
+                        [
+                            (("literal", 1), ("literal", 1)),
+                            (("literal", 2), ("ident", "y")),
+                        ],
+                    ),
                 ],
+                [
+                    "bind",
+                    ("ident", "y"),
+                    (
+                        "record",
+                        ("literal", "|"),
+                        [
+                            (("literal", 1), ("literal", 1)),
+                            (("literal", 2), ("ident", "x")),
+                        ],
+                    ),
+                ],
+                ["bind", ("ident", "x"), ("ident", "y")],
             ],
-            ["nop"],
         ],
     ]
 ]
