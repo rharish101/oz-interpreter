@@ -10,7 +10,18 @@ INPUT = [
     [
         "var",
         ("ident", "x"),
-        [["var", ("ident", "y"), ["var", ("ident", "x"), ["nop"]]], ["nop"]],
+        [
+            [
+                "var",
+                ("ident", "y"),
+                [
+                    "var",
+                    ("ident", "x"),
+                    ["bind", ("ident", "x"), ("ident", "y")],
+                ],
+            ],
+            ["nop"],
+        ],
     ]
 ]
 

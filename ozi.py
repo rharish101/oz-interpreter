@@ -25,7 +25,10 @@ class _EqClass:
 
     def get_refs(self):
         """Get the list of all variables/values in this equivalence class."""
-        return self.vars.union({self.value})
+        if self.value is None:
+            return self.vars
+        else:
+            return self.vars.union({self.value})
 
     def merge(self, other):
         """Merge this equivalence class (in-place) with another."""
@@ -176,6 +179,13 @@ class Interpreter:
                 logging.debug(f"env: {env}")
                 logging.debug(f"sas: {self.sas}")
                 self.stack.append((stmt[2], env))
+
+            elif stmt[0] == "bind":
+                logging.info(f"binding lhs: {stmt[1]} & rhs: {stmt[2]}")
+                logging.debug(f"env: {env}")
+                logging.debug(f"sas before: {self.sas}")
+                self._unify(env, stmt[1], stmt[2])
+                logging.debug(f"sas after: {self.sas}")
 
             else:
                 raise NotImplementedError
