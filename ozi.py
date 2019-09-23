@@ -44,9 +44,7 @@ class _Value:
         """Perform unification on values."""
         if not isinstance(other, self.__class__):
             return False
-        elif self.kind != other.kind():
-            return False
-        elif self.kind == "proc":
+        elif self.kind != other.kind() or self.kind == "proc":
             return False
         elif self.kind == "record":
             # TODO: Recursive unification
@@ -124,9 +122,13 @@ class Interpreter:
 
     def run(self, ast):
         """Run the given Oz AST."""
-        # Clear the interpreter
-        self.sas = {}
-        self.stack = []
+        self.sas = {}  # clear the interpreter
+        self.stack = ast[::-1]  # initialize the stack with the ast in reverse
 
         # TODO:
-        raise NotImplementedError
+        while len(self.stack) > 0:
+            stmt = self.stack.pop()
+            if stmt[0] == "nop":
+                continue
+            else:
+                raise NotImplementedError
