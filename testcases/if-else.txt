@@ -1,0 +1,4 @@
+[var ident(x) [var ident(y) [
+    [bind ident(x) literal(true)]
+    [conditional ident(x) [bind ident(y) literal(true)] [nop]]
+]]]

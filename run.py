@@ -11,48 +11,15 @@ INPUT = [
         "var",
         ("ident", "x"),
         [
+            "var",
+            ("ident", "y"),
             [
-                "var",
-                ("ident", "y"),
+                ["bind", ("ident", "x"), ("literal", "true")],
                 [
-                    [
-                        "bind",
-                        ("ident", "x"),
-                        (
-                            "record",
-                            ("literal", "|"),
-                            [
-                                (("literal", 1), ("literal", 1)),
-                                (("literal", 2), ("ident", "y")),
-                            ],
-                        ),
-                    ],
-                    [
-                        "bind",
-                        ("ident", "y"),
-                        (
-                            "record",
-                            ("literal", "|"),
-                            [
-                                (("literal", 1), ("literal", 1)),
-                                (("literal", 2), ("ident", "x")),
-                            ],
-                        ),
-                    ],
-                    ["bind", ("ident", "x"), ("ident", "y")],
-                ],
-            ],
-            [
-                "var",
-                ("ident", "f"),
-                [
-                    "bind",
-                    ("ident", "f"),
-                    (
-                        "proc",
-                        [("ident", "y")],
-                        ["bind", ("ident", "x"), ("ident", "y")],
-                    ),
+                    "conditional",
+                    ("ident", "x"),
+                    ["bind", ("ident", "y"), ("literal", "true")],
+                    ["nop"],
                 ],
             ],
         ],
