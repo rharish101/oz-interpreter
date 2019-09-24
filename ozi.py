@@ -1,9 +1,16 @@
-"""Interpreter for the Oz programming language."""
+"""Interpreter for the Oz kernel language's AST."""
 import logging
 import random
 import string
+from collections import namedtuple
 from copy import deepcopy
 from pprint import pformat
+
+Literal = namedtuple("Literal", ["value"])
+Ident = namedtuple("Identifier", ["name"])
+Variable = namedtuple("Variable", ["name"])
+Record = namedtuple("Record", ["literal", "fields"])
+Proc = namedtuple("Procedure", ["args", "contents", "ctxenv"])
 
 
 class UnificationError(Exception):
@@ -41,26 +48,25 @@ class Interpreter:
     # TODO: Run Oz operations
     def _compute(self, env, value):
         """Compute the actual value of the given Oz "value"."""
-        if value[0] in {"literal", "variable"}:
+        if type(value) in {Literal, Variable, Record, Proc}:  # already done
             return value
 
-        elif value[0] == "ident":
+        elif type(value) is Ident:
             # Storing record values in the SAS which have variables inside them
             # should store the environment-mapped SAS variable instead of the
             # Oz identifier.
-            return ("variable", env[value[1]])
+            return Variable(env[value.name])
 
         elif value[0] == "record":
-            return (
-                "record",
+            return Record(
                 value[1],
-                [(feat, self._compute(env, val)) for feat, val in value[2]],
+                {feat: self._compute(env, val) for feat, val in value[2]},
             )
 
         elif value[0] == "proc":
             fvars = self.get_fvars_value(value)
             ctx_env = {fvar: env[fvar] for fvar in fvars}
-            return ("proc", value[1], value[2], ctx_env)
+            return Proc(value[1], value[2], ctx_env)
 
         else:  # Oz operations
             raise NotImplementedError(f"{value}")
@@ -79,26 +85,29 @@ class Interpreter:
             set: The set of free variables (Oz identifiers) as a set of strings
 
         """
-        if value[0] == "ident":
-            fvars = {value[1]}
+        if type(value) is Ident:
+            fvars = {value.name}
+            logging.debug(f"free vars of {value.name}: {fvars}")
 
-        elif value[0] == "literal":
+        elif type(value) is Literal:
             fvars = set()
+            logging.debug(f"free vars of {value.value}: {fvars}")
 
         elif value[0] == "record":
             fvars = set()
             for _, sub_val in value[2]:
                 fvars = fvars.union(self.get_fvars_value(sub_val))
+            logging.debug(f"free vars of {value[0]}: {fvars}")
 
         elif value[0] == "proc":
-            args = {arg for _, arg in value[1]}
+            args = {arg.name for arg in value[1]}
             fvars = self.get_fvars(value[2])
             fvars.difference_update(args)
+            logging.debug(f"free vars of {value[0]}: {fvars}")
 
         else:  # Oz operation
             raise NotImplementedError(f"{value}")
 
-        logging.debug(f"free vars of {value[0]}: {fvars}")
         return fvars
 
     def get_fvars(self, stmt):
@@ -121,7 +130,7 @@ class Interpreter:
 
         elif stmt[0] == "var":
             fvars = self.get_fvars(stmt[2])
-            fvars.remove(stmt[1][1])
+            fvars.remove(stmt[1].name)
 
         elif stmt[0] == "bind":
             fvars = set()
@@ -129,24 +138,27 @@ class Interpreter:
                 fvars = fvars.union(self.get_fvars_value(oper))
 
         elif stmt[0] == "conditional":
-            fvars = {stmt[1][1]}
+            fvars = {stmt[1].name}
             fvars = fvars.union(self.get_fvars(stmt[2]))
             fvars = fvars.union(self.get_fvars(stmt[3]))
 
         elif stmt[0] == "match":
-            fvars = {stmt[1][1]}
+            fvars = {stmt[1].name}
             fvars = fvars.union(self.get_fvars(stmt[4]))
             fvars = fvars.union(
                 self.get_fvars(stmt[3]).difference(self.get_fvars(stmt[2]))
             )
 
         elif stmt[0] == "apply":
-            fvars = {ident[1] for ident in stmt[1:]}
+            fvars = {ident.name for ident in stmt[1:]}
 
         else:
             raise ValueError(f"{stmt} is an invalid statement")
 
-        logging.debug(f"free vars of {stmt[0]}: {fvars}")
+        if type(stmt[0]) is list:
+            logging.debug(f"free vars of combined statement: {fvars}")
+        else:
+            logging.debug(f"free vars of {stmt[0]}: {fvars}")
         return fvars
 
     def _match_records(self, lhs, rhs):
@@ -159,36 +171,20 @@ class Interpreter:
             lhs (tuple): The first record value
             rhs (tuple): The second record value
 
-        Returns:
-            dict: The dictionary representation of the first record
-            dict: The dictionary representation of the second record
-
         """
-        if lhs[0] != "record" or rhs[0] != "record":
+        if type(lhs) is not Record or type(rhs) is not Record:
             raise TypeError("Input arguments are not records")
 
-        if lhs[1] != rhs[1]:
+        if lhs.literal != rhs.literal:
             raise UnificationError("Record literals do not match")
 
-        elif len(lhs[2]) != len(rhs[2]):
+        elif len(lhs.fields) != len(rhs.fields):
             raise UnificationError("Record arities do not match")
 
-        else:
-            # Save into a record for matching record features
-            # independent of the order of the feature declaration.
-            lhs_record = {}
-            rhs_record = {}
-            for item in lhs[2]:
-                lhs_record[item[0]] = item[1]
-            for item in rhs[2]:
-                rhs_record[item[0]] = item[1]
-
-            if lhs_record.keys() != rhs_record.keys():
-                # Value returned by `dict.keys` acts like a set, so
-                # order doesn't matter.
-                raise UnificationError("Record features do not match")
-            else:
-                return lhs_record, rhs_record
+        elif lhs.fields.keys() != rhs.fields.keys():
+            # Value returned by `dict.keys` acts like a set, so
+            # order doesn't matter.
+            raise UnificationError("Record features do not match")
 
     def _unify_vars(self, env, lhs, rhs):
         """Unify two variables."""
@@ -196,12 +192,12 @@ class Interpreter:
         sas_vars = []
 
         for oper in [lhs, rhs]:
-            if oper[0] == "ident":
-                sas_vars.append(env[oper[1]])
-                eq_classes.append(self.sas[env[oper[1]]])
+            if type(oper) is Ident:
+                sas_vars.append(env[oper.name])
+                eq_classes.append(self.sas[env[oper.name]])
             else:  # SAS variable
-                sas_vars.append(oper[1])
-                eq_classes.append(self.sas[oper[1]])
+                sas_vars.append(oper.name)
+                eq_classes.append(self.sas[oper.name])
 
         class1, class2 = eq_classes
         logging.debug(f"unifying: {sas_vars[0]} & {sas_vars[1]}")
@@ -237,19 +233,19 @@ class Interpreter:
         rhs = self._compute(env, rhs)
         logging.debug(f"unifying {lhs} and {rhs}")
 
-        if lhs[0] != rhs[0]:
+        if type(lhs) is not type(rhs):
             raise TypeError("Values are not of the same type")
 
-        if lhs[0] == "proc":  # procedure values
+        if type(lhs) is Proc:
             raise UnificationError("Procedures cannot match")
 
-        if lhs[0] == "literal" and lhs[1] != rhs[1]:  # numeric values
-            raise UnificationError("Numeric values do not match")
+        if type(lhs) is Literal and lhs.value != rhs.value:
+            raise UnificationError("Literal values do not match")
 
-        elif lhs[0] == "record":
-            lhs_record, rhs_record = self._match_records(lhs, rhs)
-            for key in lhs_record:
-                self.unify(env, lhs_record[key], rhs_record[key])
+        elif type(lhs) is Record:
+            self._match_records(lhs, rhs)
+            for key in lhs.fields:
+                self.unify(env, lhs.fields[key], rhs.fields[key])
 
     def unify(self, env, lhs, rhs):
         """Unify both input variables/values.
@@ -265,22 +261,22 @@ class Interpreter:
             UnificationError: If the input operands cannot be unified
 
         """
-        var_check = {"ident", "variable"}
+        var_types = {Ident, Variable}
 
-        if lhs[0] in var_check and rhs[0] in var_check:  # <x> = <y>
+        if type(lhs) in var_types and type(rhs) in var_types:  # <x> = <y>
             self._unify_vars(env, lhs, rhs)
 
-        elif lhs[0] in var_check or rhs[0] in var_check:  # <x> = <v>
+        elif type(lhs) in var_types or type(rhs) in var_types:  # <x> = <v>
             # Input can be either `<x> = <v>` or `<v> = <x>`, so convert it
             # into `<x> = <v>`.
-            if lhs[0] == "ident":
-                var, value = env[lhs[1]], rhs
-            elif lhs[0] == "variable":
-                var, value = lhs[1], rhs
-            elif rhs[0] == "ident":
-                var, value = env[rhs[1]], lhs
+            if type(lhs) is Ident:
+                var, value = env[lhs.name], rhs
+            elif type(lhs) is Variable:
+                var, value = lhs.name, rhs
+            elif type(rhs) is Ident:
+                var, value = env[rhs.name], lhs
             else:
-                var, value = rhs[1], lhs
+                var, value = rhs.name, lhs
 
             value = self._compute(env, value)
             class1 = self.sas[var]
@@ -317,16 +313,16 @@ class Interpreter:
             tuple: The resulting statement to be pushed onto the stack
 
         """
-        ident = stmt[1][1]
+        ident = stmt[1].name
         logging.info(f"if-else on: {ident}")
         eq_class = self.sas[env[ident]]
         if not eq_class.is_bound():
             raise UnboundVariableError(f"{ident} is unbound")
 
-        value = eq_class.value
-        if value[0] != "literal" or type(value[1]) is not bool:
+        cond = eq_class.value
+        if type(cond) is not Literal or type(cond.value) is not bool:
             raise TypeError(f"{ident} is not a boolean")
-        elif value[1]:
+        elif cond.value:
             return stmt[2]
         else:
             return stmt[3]
@@ -343,17 +339,22 @@ class Interpreter:
             dict: The resulting environment to be pushed onto the stack
 
         """
-        ident = stmt[1][1]
+        ident = stmt[1].name
         logging.info(f"case on: {ident}")
         eq_class = self.sas[env[ident]]
 
         if stmt[2][0] != "record":
             raise TypeError(f"Invalid pattern: {stmt[2]}")
-        elif not eq_class.is_bound():
+        else:
+            pattern = Record(
+                stmt[2][1], {feat: val for feat, val in stmt[2][2]}
+            )
+
+        if not eq_class.is_bound():
             raise UnboundVariableError(f"{ident} is unbound")
 
         try:
-            value, pattern = self._match_records(eq_class.value, stmt[2])
+            self._match_records(eq_class.value, pattern)
 
         except (TypeError, UnificationError):
             # Either not a record, or doesn't match
@@ -366,10 +367,10 @@ class Interpreter:
             # Avoid editing environments of other statements in the
             # stack.
             new_env = deepcopy(env)
-            for feat, item in pattern.items():
-                if item[0] == "ident":
-                    new_env[item[1]] = self._alloc_var()
-                    self.unify(new_env, item, value[feat])
+            for feat, item in pattern.fields.items():
+                if type(item) is Ident:
+                    new_env[item.name] = self._alloc_var()
+                    self.unify(new_env, item, eq_class.value.fields[feat])
             logging.debug(f"env for case: {pformat(new_env)}")
 
             return stmt[3], new_env
@@ -386,25 +387,25 @@ class Interpreter:
             dict: The resulting environment to be pushed onto the stack
 
         """
-        proc = stmt[1][1]
+        proc = stmt[1].name
         logging.info(f"calling: {proc}")
         eq_class = self.sas[env[proc]]
         if not eq_class.is_bound():
             raise UnboundVariableError(f"{proc} is unbound")
 
         value = eq_class.value
-        if value[0] != "proc":
+        if type(value) is not Proc:
             raise TypeError(f"{proc} is not a procedure")
-        elif len(value[1]) != len(stmt) - 2:
+        elif len(value.args) != len(stmt) - 2:
             raise TypeError(f"No. of arguments do not match arity of {proc}")
 
         # Avoid editing the contextual environment by reference
-        new_env = deepcopy(value[3])
-        for arg, param in zip(value[1], stmt[2:]):
-            new_env[arg[1]] = env[param[1]]
+        new_env = deepcopy(value.ctxenv)
+        for arg, param in zip(value.args, stmt[2:]):
+            new_env[arg.name] = env[param.name]
         logging.debug(f"call env: {new_env}")
 
-        return value[2], new_env
+        return value.contents, new_env
 
     def run(self, ast):
         """Run the given Oz AST."""
@@ -425,11 +426,11 @@ class Interpreter:
                     stack.append((sub_stmt, env))
 
             elif stmt[0] == "var":
-                logging.info(f"local statement with var: {stmt[1][1]}")
+                logging.info(f"local statement with var: {stmt[1].name}")
 
                 # Avoid editing environments of other statements in the stack
                 new_env = deepcopy(env)
-                new_env[stmt[1][1]] = self._alloc_var()
+                new_env[stmt[1].name] = self._alloc_var()
 
                 logging.debug(f"new env: {pformat(new_env)}")
                 logging.debug(f"sas: {pformat(self.sas)}")

@@ -3,31 +3,31 @@
 import logging
 from argparse import ArgumentParser
 
-from ozi import Interpreter
+from ozi import Ident, Interpreter, Literal
 
 # TODO: Create a parser for the Oz input syntax
 INPUT = [
     "var",
-    ("ident", "x"),
+    Ident("x"),
     [
         "var",
-        ("ident", "y"),
+        Ident("y"),
         [
-            ["bind", ("ident", "y"), ("literal", True)],
+            ["bind", Ident("y"), Literal(True)],
             [
                 "var",
-                ("ident", "f"),
+                Ident("f"),
                 [
                     [
                         "bind",
                         [
                             "proc",
-                            [("ident", "x")],
-                            ["bind", ("ident", "y"), ("ident", "x")],
+                            [Ident("x")],
+                            ["bind", Ident("y"), Ident("x")],
                         ],
-                        ("ident", "f"),
+                        Ident("f"),
                     ],
-                    ["apply", ("ident", "f"), ("ident", "x")],
+                    ["apply", Ident("f"), Ident("x")],
                 ],
             ],
         ],
@@ -53,7 +53,9 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description="Run the Oz interpreter on input")
+    parser = ArgumentParser(
+        description="Interpreter for the Oz kernel language"
+    )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="view some verbose output"
     )
