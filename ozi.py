@@ -10,8 +10,8 @@ class UnificationError(Exception):
     """Exception for unification errors."""
 
 
-class Suspension(Exception):
-    """Exception for interpreter suspension."""
+class UnboundVariableError(Exception):
+    """Exception for interpreter suspension due to unbound variables."""
 
 
 class _EqClass:
@@ -58,7 +58,7 @@ class Interpreter:
             )
 
         elif value[0] == "proc":
-            fvars = self._get_fvars_value(value)
+            fvars = self.get_fvars_value(value)
             ctx_env = {fvar: env[fvar] for fvar in fvars}
             return ("proc", value[1], value[2], ctx_env)
 
@@ -66,11 +66,18 @@ class Interpreter:
             raise NotImplementedError(f"{value}")
 
     # TODO: Complete for Oz operations
-    def _get_fvars_value(self, value):
+    def get_fvars_value(self, value):
         """Get the free variables of an Oz variable or value/operation.
 
         NOTE: The input must not have been "computed" using `_compute`, as free
         variables of Oz operations are lost on computation.
+
+        Args:
+            value (tuple): The input Oz value
+
+        Returns:
+            set: The set of free variables (Oz identifiers) as a set of strings
+
         """
         if value[0] == "ident":
             fvars = {value[1]}
@@ -81,11 +88,11 @@ class Interpreter:
         elif value[0] == "record":
             fvars = set()
             for _, sub_val in value[2]:
-                fvars = fvars.union(self._get_fvars_value(sub_val))
+                fvars = fvars.union(self.get_fvars_value(sub_val))
 
         elif value[0] == "proc":
             args = {arg for _, arg in value[1]}
-            fvars = self._get_fvars(value[2])
+            fvars = self.get_fvars(value[2])
             fvars.difference_update(args)
 
         else:  # Oz operation
@@ -94,43 +101,50 @@ class Interpreter:
         logging.debug(f"free vars of {value[0]}: {fvars}")
         return fvars
 
-    # TODO: Complete for all statement types
-    def _get_fvars(self, stmt):
-        """Get the free variables of the given statement."""
+    def get_fvars(self, stmt):
+        """Get the free variables of the given statement.
+
+        Args:
+            stmt (tuple): The input Oz statement's AST
+
+        Returns:
+            set: The set of free variables (Oz identifiers) as a set of strings
+
+        """
         if stmt[0] == "nop":
             fvars = set()
 
         elif type(stmt[0]) is list:
             fvars = set()
             for sub_stmt in stmt:
-                fvars = fvars.union(self._get_fvars(sub_stmt))
+                fvars = fvars.union(self.get_fvars(sub_stmt))
 
         elif stmt[0] == "var":
-            fvars = self._get_fvars(stmt[2])
+            fvars = self.get_fvars(stmt[2])
             fvars.remove(stmt[1][1])
 
         elif stmt[0] == "bind":
             fvars = set()
             for oper in stmt[1:]:
-                fvars = fvars.union(self._get_fvars_value(oper))
+                fvars = fvars.union(self.get_fvars_value(oper))
 
         elif stmt[0] == "conditional":
             fvars = {stmt[1][1]}
-            fvars = fvars.union(self._get_fvars(stmt[2]))
-            fvars = fvars.union(self._get_fvars(stmt[3]))
+            fvars = fvars.union(self.get_fvars(stmt[2]))
+            fvars = fvars.union(self.get_fvars(stmt[3]))
 
         elif stmt[0] == "match":
             fvars = {stmt[1][1]}
-            fvars = fvars.union(self._get_fvars(stmt[4]))
+            fvars = fvars.union(self.get_fvars(stmt[4]))
             fvars = fvars.union(
-                self._get_fvars(stmt[3]).difference(self._get_fvars(stmt[2]))
+                self.get_fvars(stmt[3]).difference(self.get_fvars(stmt[2]))
             )
 
         elif stmt[0] == "apply":
             fvars = {ident[1] for ident in stmt[1:]}
 
         else:
-            raise NotImplementedError(f"{stmt}")
+            raise ValueError(f"{stmt} is an invalid statement")
 
         logging.debug(f"free vars of {stmt[0]}: {fvars}")
         return fvars
@@ -235,10 +249,22 @@ class Interpreter:
         elif lhs[0] == "record":
             lhs_record, rhs_record = self._match_records(lhs, rhs)
             for key in lhs_record:
-                self._unify(env, lhs_record[key], rhs_record[key])
+                self.unify(env, lhs_record[key], rhs_record[key])
 
-    def _unify(self, env, lhs, rhs):
-        """Unify both input variables/values."""
+    def unify(self, env, lhs, rhs):
+        """Unify both input variables/values.
+
+        Args:
+            env (dict): The current variable environment
+            lhs (tuple): The LHS of a bind statement, or the first argument for
+                unification
+            rhs (tuple): The RHS of a bind statement, or the second argument
+                for unification
+
+        Raises:
+            UnificationError: If the input operands cannot be unified
+
+        """
         var_check = {"ident", "variable"}
 
         if lhs[0] in var_check and rhs[0] in var_check:  # <x> = <y>
@@ -263,7 +289,7 @@ class Interpreter:
             if not class1.is_bound():
                 class1.value = value
             else:
-                self._unify(env, class1.value, value)
+                self.unify(env, class1.value, value)
 
         else:  # <v> = <v>
             self._unify_values(env, lhs, rhs)
@@ -280,12 +306,111 @@ class Interpreter:
                 self.sas[new] = _EqClass(new)
                 return new
 
+    def _if_stmt(self, stmt, env):
+        """Process a suspendable Oz if-else statement.
+
+        Args:
+            stmt (tuple): The Oz if-else statement's AST
+            env (dict): The current variable environment
+
+        Returns:
+            tuple: The resulting statement to be pushed onto the stack
+
+        """
+        ident = stmt[1][1]
+        logging.info(f"if-else on: {ident}")
+        eq_class = self.sas[env[ident]]
+        if not eq_class.is_bound():
+            raise UnboundVariableError(f"{ident} is unbound")
+
+        value = eq_class.value
+        if value[0] != "literal" or type(value[1]) is not bool:
+            raise TypeError(f"{ident} is not a boolean")
+        elif value[1]:
+            return stmt[2]
+        else:
+            return stmt[3]
+
+    def _match_stmt(self, stmt, env):
+        """Process a suspendable Oz case statement.
+
+        Args:
+            stmt (tuple): The Oz case statement's AST
+            env (dict): The current variable environment
+
+        Returns:
+            tuple: The resulting statement to be pushed onto the stack
+            dict: The resulting environment to be pushed onto the stack
+
+        """
+        ident = stmt[1][1]
+        logging.info(f"case on: {ident}")
+        eq_class = self.sas[env[ident]]
+
+        if stmt[2][0] != "record":
+            raise TypeError(f"Invalid pattern: {stmt[2]}")
+        elif not eq_class.is_bound():
+            raise UnboundVariableError(f"{ident} is unbound")
+
+        try:
+            value, pattern = self._match_records(eq_class.value, stmt[2])
+
+        except (TypeError, UnificationError):
+            # Either not a record, or doesn't match
+            logging.debug(f"{ident} doesn't match pattern")
+            return stmt[4], env
+
+        else:
+            logging.debug(f"{ident} matches pattern")
+
+            # Avoid editing environments of other statements in the
+            # stack.
+            new_env = deepcopy(env)
+            for feat, item in pattern.items():
+                if item[0] == "ident":
+                    new_env[item[1]] = self._alloc_var()
+                    self.unify(new_env, item, value[feat])
+            logging.debug(f"env for case: {pformat(new_env)}")
+
+            return stmt[3], new_env
+
+    def _apply_stmt(self, stmt, env):
+        """Process a suspendable Oz procedure call.
+
+        Args:
+            stmt (tuple): The Oz procedure call statement's AST
+            env (dict): The current variable environment
+
+        Returns:
+            tuple: The resulting statement to be pushed onto the stack
+            dict: The resulting environment to be pushed onto the stack
+
+        """
+        proc = stmt[1][1]
+        logging.info(f"calling: {proc}")
+        eq_class = self.sas[env[proc]]
+        if not eq_class.is_bound():
+            raise UnboundVariableError(f"{proc} is unbound")
+
+        value = eq_class.value
+        if value[0] != "proc":
+            raise TypeError(f"{proc} is not a procedure")
+        elif len(value[1]) != len(stmt) - 2:
+            raise TypeError(f"No. of arguments do not match arity of {proc}")
+
+        # Avoid editing the contextual environment by reference
+        new_env = deepcopy(value[3])
+        for arg, param in zip(value[1], stmt[2:]):
+            new_env[arg[1]] = env[param[1]]
+        logging.debug(f"call env: {new_env}")
+
+        return value[2], new_env
+
     def run(self, ast):
         """Run the given Oz AST."""
         self.sas = {}  # clear the interpreter
         stack = [(ast, {})]  # initialize with empty environment
 
-        # TODO: Complete for all statement types
         while len(stack) > 0:
             stmt, env = stack.pop()
 
@@ -314,85 +439,19 @@ class Interpreter:
                 logging.info(f"binding lhs: {stmt[1]} & rhs: {stmt[2]}")
                 logging.debug(f"env: {pformat(env)}")
                 logging.debug(f"sas before: {pformat(self.sas)}")
-                self._unify(env, stmt[1], stmt[2])
+                self.unify(env, stmt[1], stmt[2])
                 logging.debug(f"sas after: {pformat(self.sas)}")
 
             elif stmt[0] == "conditional":
-                ident = stmt[1][1]
-                logging.info(f"if-else on: {ident}")
-                eq_class = self.sas[env[ident]]
-                if eq_class.is_bound():
-                    value = eq_class.value
-                    if value[0] != "literal" or type(value[1]) is not bool:
-                        raise TypeError(f"{ident} is not a boolean")
-                    elif value[1]:
-                        stack.append((stmt[2], env))
-                    else:
-                        stack.append((stmt[3], env))
-                else:
-                    raise Suspension(f"{ident} is unbound")
+                # The environment doesn't change, so this function is made to
+                # not return the environment.
+                stack.append((self._if_stmt(stmt, env), env))
 
             elif stmt[0] == "match":
-                ident = stmt[1][1]
-                logging.info(f"case on: {ident}")
-                eq_class = self.sas[env[ident]]
-
-                if stmt[2][0] != "record":
-                    raise TypeError(f"Invalid pattern: {stmt[2]}")
-
-                elif eq_class.is_bound():
-                    try:
-                        value, pattern = self._match_records(
-                            eq_class.value, stmt[2]
-                        )
-
-                    except (TypeError, UnificationError):
-                        # Either not a record, or doesn't match
-                        logging.debug(f"{ident} doesn't match pattern")
-                        stack.append((stmt[4], env))
-
-                    else:
-                        logging.debug(f"{ident} matches pattern")
-
-                        # Avoid editing environments of other statements in the
-                        # stack.
-                        new_env = deepcopy(env)
-                        for feat, item in pattern.items():
-                            if item[0] == "ident":
-                                new_env[item[1]] = self._alloc_var()
-                                self._unify(new_env, item, value[feat])
-                        logging.debug(f"env for case: {pformat(new_env)}")
-
-                        stack.append((stmt[3], new_env))
-
-                else:
-                    raise Suspension(f"{ident} is unbound")
+                stack.append(self._match_stmt(stmt, env))
 
             elif stmt[0] == "apply":
-                ident = stmt[1][1]
-                logging.info(f"calling: {ident}")
-                eq_class = self.sas[env[ident]]
-
-                if eq_class.is_bound():
-                    value = eq_class.value
-                    if value[0] != "proc":
-                        raise TypeError(f"{ident} is not a procedure")
-
-                    elif len(value[1]) != len(stmt) - 2:
-                        raise TypeError(
-                            f"No. of arguments do not match arity of {ident}"
-                        )
-
-                    else:
-                        # Avoid editing the contextual environment by reference
-                        new_env = deepcopy(value[3])
-                        for arg, param in zip(value[1], stmt[2:]):
-                            new_env[arg[1]] = env[param[1]]
-                        logging.info(f"call env: {new_env}")
-                        stack.append((value[2], new_env))
-
-                else:
-                    raise Suspension(f"{ident} is unbound")
+                stack.append(self._apply_stmt(stmt, env))
 
             else:
-                raise NotImplementedError(f"{stmt}")
+                raise ValueError(f"{stmt} is an invalid statement")
