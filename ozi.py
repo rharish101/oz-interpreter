@@ -59,7 +59,7 @@ class Interpreter:
             return ("proc", value[1], value[2], ctx_env)
 
         else:  # Oz operations
-            raise NotImplementedError
+            raise NotImplementedError(f"{value}")
 
     # TODO: Complete for Oz operations
     def _get_fvars_value(self, value):
@@ -85,8 +85,9 @@ class Interpreter:
             fvars.difference_update(args)
 
         else:  # Oz operation
-            raise NotImplementedError
+            raise NotImplementedError(f"{value}")
 
+        logging.debug(f"free vars of {value[0]}: {fvars}")
         return fvars
 
     # TODO: Complete for all statement types
@@ -110,20 +111,24 @@ class Interpreter:
                 fvars = fvars.union(self._get_fvars_value(oper))
 
         else:
-            print(stmt)
-            raise NotImplementedError
+            raise NotImplementedError(f"{stmt}")
 
+        logging.debug(f"free vars of {stmt[0]}: {fvars}")
         return fvars
 
     def _unify_vars(self, env, lhs, rhs):
         """Unify two variables."""
         eq_classes = []
+        sas_vars = []
         for oper in [lhs, rhs]:
             if oper[0] == "ident":
+                sas_vars.append(env[oper[1]])
                 eq_classes.append(self.sas[env[oper[1]]])
             else:  # SAS variable
+                sas_vars.append(oper[1])
                 eq_classes.append(self.sas[oper[1]])
         class1, class2 = eq_classes
+        logging.debug(f"unifying: {sas_vars[0]} & {sas_vars[1]}")
 
         if class1 is not class2:
             # Flag for unifying values after merging equivalence classes.
@@ -137,6 +142,7 @@ class Interpreter:
                 # recursion in unification of record values, we need to unify
                 # their values after merging their equivalence classes, which
                 # marks the variables as unified.
+                logging.debug("marking both as unified before check")
                 unify_vals = True
             class1.vars = class1.vars.union(class2.vars)
 
@@ -153,17 +159,23 @@ class Interpreter:
         """Unify two Oz values."""
         lhs = self._compute(env, lhs)
         rhs = self._compute(env, rhs)
+        logging.debug(f"unifying {lhs} and {rhs}")
 
-        if (
-            lhs[0] != rhs[0]
-            or lhs[0] == "proc"  # procedure values
-            or (lhs[0] == "literal" and lhs[1] != rhs[1])  # numeric values
-        ):
-            raise UnificationError
+        if lhs[0] != rhs[0]:
+            raise TypeError("Values are not of the same type")
+
+        if lhs[0] == "proc":  # procedure values
+            raise UnificationError("Procedures cannot match")
+
+        if lhs[0] == "literal" and lhs[1] != rhs[1]:  # numeric values
+            raise UnificationError("Numeric values do not match")
 
         elif lhs[0] == "record":
-            if lhs[1] != rhs[1] or len(lhs[2]) != len(rhs[2]):
-                raise UnificationError
+            if lhs[1] != rhs[1]:
+                raise UnificationError("Record literals do not match")
+
+            elif len(lhs[2]) != len(rhs[2]):
+                raise UnificationError("Record arities do not match")
 
             else:
                 # Save into a record for matching record features
@@ -178,7 +190,7 @@ class Interpreter:
                 if lhs_record.keys() != rhs_record.keys():
                     # Value returned by `dict.keys` acts like a set, so
                     # order doesn't matter.
-                    raise UnificationError
+                    raise UnificationError("Record features do not match")
                 else:
                     for key in lhs_record:
                         self._unify(env, lhs_record[key], rhs_record[key])
@@ -198,6 +210,7 @@ class Interpreter:
 
             value = self._compute(env, value)
             class1 = self.sas[env[var]]
+            logging.debug(f"unifying {env[var]} and {value}")
 
             if not class1.is_bound():
                 class1.value = value
@@ -258,4 +271,4 @@ class Interpreter:
                 logging.debug(f"sas after: {pformat(self.sas)}")
 
             else:
-                raise NotImplementedError
+                raise NotImplementedError(f"{stmt}")
