@@ -186,25 +186,27 @@ class Interpreter:
             # order doesn't matter.
             raise UnificationError("Record features do not match")
 
-    def _unify_vars(self, env, lhs, rhs):
+    def _unify_vars(self, env, lhs, rhs, marked):
         """Unify two variables."""
-        eq_classes = []
         sas_vars = []
-
         for oper in [lhs, rhs]:
             if type(oper) is Ident:
                 sas_vars.append(env[oper.name])
-                eq_classes.append(self.sas[env[oper.name]])
             else:  # SAS variable
                 sas_vars.append(oper.name)
-                eq_classes.append(self.sas[oper.name])
+        lhs, rhs = sas_vars
 
-        class1, class2 = eq_classes
-        logging.debug(f"unifying: {sas_vars[0]} & {sas_vars[1]}")
+        logging.debug(f"unifying: {lhs} & {rhs}")
+        if rhs == marked.get(lhs, "") or lhs == marked.get(rhs, ""):
+            logging.debug(
+                f"ignoring unification as {lhs} & {rhs} are marked unified"
+            )
+            return
+
+        class1 = self.sas[lhs]
+        class2 = self.sas[rhs]
 
         if class1 is not class2:
-            # Flag for unifying values after merging equivalence classes.
-            unify_vals = False
             if not class1.is_bound():
                 # If the class2 class is bound, then this take its value, else
                 # it stays unbound (as the class2 class's value is None).
@@ -212,26 +214,25 @@ class Interpreter:
             elif class2.is_bound():
                 # Both variables are bound, so in order to prevent infinite
                 # recursion in unification of record values, we need to unify
-                # their values after merging their equivalence classes, which
-                # marks the variables as unified.
+                # their values after marking the variables as unified.
                 logging.debug("marking both as unified before check")
-                unify_vals = True
+                marked[lhs] = rhs
+                self._unify_values(
+                    env, class1.value, class2.value, marked=marked
+                )
             class1.vars = class1.vars.union(class2.vars)
 
             for ref in class2.vars:
                 # All variables that map to the second equivalence class are to
                 # be pointed to the merged equivalence class.
                 self.sas[ref] = class1
-
-            if unify_vals:
-                self._unify_values(env, class1.value, class2.value)
             del class2
 
-    def _unify_values(self, env, lhs, rhs):
+    def _unify_values(self, env, lhs, rhs, marked):
         """Unify two Oz values."""
         lhs = self._compute(env, lhs)
         rhs = self._compute(env, rhs)
-        logging.debug(f"unifying {lhs} and {rhs}")
+        logging.debug(f"unifying {lhs} & {rhs}")
 
         if type(lhs) is not type(rhs):
             raise TypeError("Values are not of the same type")
@@ -245,9 +246,11 @@ class Interpreter:
         elif type(lhs) is Record:
             self._match_records(lhs, rhs)
             for key in lhs.fields:
-                self.unify(env, lhs.fields[key], rhs.fields[key])
+                self.unify(
+                    env, lhs.fields[key], rhs.fields[key], marked=marked
+                )
 
-    def unify(self, env, lhs, rhs):
+    def unify(self, env, lhs, rhs, marked={}):
         """Unify both input variables/values.
 
         Args:
@@ -256,6 +259,7 @@ class Interpreter:
                 unification
             rhs (tuple): The RHS of a bind statement, or the second argument
                 for unification
+            marked (tuple):
 
         Raises:
             UnificationError: If the input operands cannot be unified
@@ -264,7 +268,7 @@ class Interpreter:
         var_types = {Ident, Variable}
 
         if type(lhs) in var_types and type(rhs) in var_types:  # <x> = <y>
-            self._unify_vars(env, lhs, rhs)
+            self._unify_vars(env, lhs, rhs, marked=marked)
 
         elif type(lhs) in var_types or type(rhs) in var_types:  # <x> = <v>
             # Input can be either `<x> = <v>` or `<v> = <x>`, so convert it
@@ -280,15 +284,15 @@ class Interpreter:
 
             value = self._compute(env, value)
             class1 = self.sas[var]
-            logging.debug(f"unifying {var} and {value}")
+            logging.debug(f"unifying {var} & {value}")
 
             if not class1.is_bound():
                 class1.value = value
             else:
-                self.unify(env, class1.value, value)
+                self.unify(env, class1.value, value, marked=marked)
 
         else:  # <v> = <v>
-            self._unify_values(env, lhs, rhs)
+            self._unify_values(env, lhs, rhs, marked=marked)
 
     def _alloc_var(self, length=16):
         """Allocate a variable on the single-assignment store and return it."""
