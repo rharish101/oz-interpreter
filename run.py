@@ -2,7 +2,6 @@
 """Run the Oz interpreter on input."""
 import logging
 from argparse import ArgumentParser
-from sys import stderr
 
 from ozi import Interpreter
 
@@ -70,7 +69,9 @@ def main(args):
 
     """
     if args.debug:
-        logging.basicConfig(stream=stderr, level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG)
+    elif args.verbose:
+        logging.basicConfig(level=logging.INFO)
 
     interp = Interpreter()
     interp.run(INPUT)
@@ -78,6 +79,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Run the Oz interpreter on input")
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="view some verbose output"
+    )
     parser.add_argument(
         "-d", "--debug", action="store_true", help="view logging output"
     )

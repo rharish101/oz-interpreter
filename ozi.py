@@ -10,6 +10,10 @@ class UnificationError(Exception):
     """Exception for unification errors."""
 
 
+class Suspension(Exception):
+    """Exception for interpreter suspension."""
+
+
 class _EqClass:
     """Equivalence class for the single-assignment store."""
 
@@ -109,6 +113,21 @@ class Interpreter:
             fvars = set()
             for oper in stmt[1:]:
                 fvars = fvars.union(self._get_fvars_value(oper))
+
+        elif stmt[0] == "conditional":
+            fvars = {stmt[1][1]}
+            fvars = fvars.union(self._get_fvars(stmt[2]))
+            fvars = fvars.union(self._get_fvars(stmt[3]))
+
+        elif stmt[0] == "match":
+            fvars = {stmt[1][1]}
+            fvars = fvars.union(self._get_fvars(stmt[4]))
+            fvars = fvars.union(
+                self._get_fvars(stmt[3]).difference(self._get_fvars(stmt[2]))
+            )
+
+        elif stmt[0] == "apply":
+            fvars = {ident[1] for ident in stmt[1:]}
 
         else:
             raise NotImplementedError(f"{stmt}")
@@ -269,6 +288,24 @@ class Interpreter:
                 logging.debug(f"env: {pformat(env)}")
                 self._unify(env, stmt[1], stmt[2])
                 logging.debug(f"sas after: {pformat(self.sas)}")
+
+            elif stmt[0] == "conditional":
+                ident = stmt[1][1]
+                logging.info(f"if-else on: {ident}")
+                eq_class = self.sas[env[ident]]
+                if eq_class.is_bound():
+                    value = eq_class.value
+                    if value[0] != "literal" or value[1] not in {
+                        "true",
+                        "false",
+                    }:
+                        raise TypeError(f"{ident} is not a boolean")
+                    elif value[1] == "true":
+                        stack.append((stmt[2], env))
+                    else:
+                        stack.append((stmt[3], env))
+                else:
+                    raise Suspension(f"{ident} is unbound")
 
             else:
                 raise NotImplementedError(f"{stmt}")
