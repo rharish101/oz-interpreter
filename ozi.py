@@ -251,6 +251,8 @@ class Interpreter:
                 var, value = env[lhs[1]], rhs
             elif lhs[0] == "variable":
                 var, value = lhs[1], rhs
+            elif rhs[0] == "ident":
+                var, value = env[rhs[1]], lhs
             else:
                 var, value = rhs[1], lhs
 
@@ -321,12 +323,9 @@ class Interpreter:
                 eq_class = self.sas[env[ident]]
                 if eq_class.is_bound():
                     value = eq_class.value
-                    if value[0] != "literal" or value[1] not in {
-                        "true",
-                        "false",
-                    }:
+                    if value[0] != "literal" or type(value[1]) is not bool:
                         raise TypeError(f"{ident} is not a boolean")
-                    elif value[1] == "true":
+                    elif value[1]:
                         stack.append((stmt[2], env))
                     else:
                         stack.append((stmt[3], env))
@@ -365,6 +364,32 @@ class Interpreter:
                         logging.debug(f"env for case: {pformat(new_env)}")
 
                         stack.append((stmt[3], new_env))
+
+                else:
+                    raise Suspension(f"{ident} is unbound")
+
+            elif stmt[0] == "apply":
+                ident = stmt[1][1]
+                logging.info(f"calling: {ident}")
+                eq_class = self.sas[env[ident]]
+
+                if eq_class.is_bound():
+                    value = eq_class.value
+                    if value[0] != "proc":
+                        raise TypeError(f"{ident} is not a procedure")
+
+                    elif len(value[1]) != len(stmt) - 2:
+                        raise TypeError(
+                            f"No. of arguments do not match arity of {ident}"
+                        )
+
+                    else:
+                        # Avoid editing the contextual environment by reference
+                        new_env = deepcopy(value[3])
+                        for arg, param in zip(value[1], stmt[2:]):
+                            new_env[arg[1]] = env[param[1]]
+                        logging.info(f"call env: {new_env}")
+                        stack.append((value[2], new_env))
 
                 else:
                     raise Suspension(f"{ident} is unbound")

@@ -7,38 +7,31 @@ from ozi import Interpreter
 
 # TODO: Create a parser for the Oz input syntax
 INPUT = [
+    "var",
+    ("ident", "x"),
     [
         "var",
-        ("ident", "x"),
+        ("ident", "y"),
         [
+            ["bind", ("ident", "y"), ("literal", True)],
             [
-                "bind",
-                ("ident", "x"),
-                (
-                    "record",
-                    ("literal", "|"),
+                "var",
+                ("ident", "f"),
+                [
                     [
-                        (("literal", 1), ("literal", 1)),
-                        (("literal", 2), ("ident", "x")),
+                        "bind",
+                        [
+                            "proc",
+                            [("ident", "x")],
+                            ["bind", ("ident", "y"), ("ident", "x")],
+                        ],
+                        ("ident", "f"),
                     ],
-                ),
-            ],
-            [
-                "match",
-                ("ident", "x"),
-                (
-                    "record",
-                    ("literal", "|"),
-                    [
-                        (("literal", 1), ("ident", "a")),
-                        (("literal", 2), ("ident", "b")),
-                    ],
-                ),
-                ["bind", ("ident", "x"), ("ident", "b")],
-                ["nop"],
+                    ["apply", ("ident", "f"), ("ident", "x")],
+                ],
             ],
         ],
-    ]
+    ],
 ]
 
 
