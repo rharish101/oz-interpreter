@@ -2,37 +2,9 @@
 """Run the Oz interpreter on input."""
 import logging
 from argparse import ArgumentParser
+from importlib import import_module
 
-from ozi import Ident, Interpreter, Literal
-
-# TODO: Create a parser for the Oz input syntax
-INPUT = [
-    "var",
-    Ident("x"),
-    [
-        "var",
-        Ident("y"),
-        [
-            ["bind", Ident("y"), Literal(True)],
-            [
-                "var",
-                Ident("f"),
-                [
-                    [
-                        "bind",
-                        [
-                            "proc",
-                            [Ident("x")],
-                            ["bind", Ident("y"), Ident("x")],
-                        ],
-                        Ident("f"),
-                    ],
-                    ["apply", Ident("f"), Ident("x")],
-                ],
-            ],
-        ],
-    ],
-]
+from ozi import Interpreter
 
 
 def main(args):
@@ -48,13 +20,20 @@ def main(args):
     elif args.verbose:
         logging.basicConfig(level=logging.INFO)
 
+    testcase = import_module(f"testcases.{args.testcase}")
     interp = Interpreter()
-    interp.run(INPUT)
+    interp.run(testcase.ast)
 
 
 if __name__ == "__main__":
     parser = ArgumentParser(
-        description="Interpreter for the Oz kernel language"
+        description="Interpreter for the Oz kernel language's AST"
+    )
+    parser.add_argument(
+        "testcase",
+        metavar="TESTCASE",
+        type=str,
+        help="the name of the testcase",
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="view some verbose output"

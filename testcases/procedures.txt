@@ -1,7 +1,0 @@
-[var ident(x) [var ident(y) [
-    [bind ident(y) literal(true)]
-    [var ident(f) [
-        [bind [proc [ident(x)] [bind ident(y) ident(x)]] ident(f)]
-        [apply ident(f) ident(x)]
-    ]]
-]]]

@@ -7,8 +7,12 @@ The goal is to build an interpreter for the kernel language of the [Oz](https://
 * Python 3.6+
 
 ## Instructions
-1. Edit the `run.py` file and edit the `INPUT` variable to contain the input AST.
-2. Run the file:
+1. Choose a testcase from the "testcases" directory.
+2. Run the interpreter as follows:
 ```
-./run.py
+./run.py name_of_testcase
+```
+For example, if you want to use the testcase "testcases/conditionals.py":
+```
+./run.py conditionals
 ```
