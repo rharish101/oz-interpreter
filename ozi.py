@@ -135,10 +135,52 @@ class Interpreter:
         logging.debug(f"free vars of {stmt[0]}: {fvars}")
         return fvars
 
+    def _match_records(self, lhs, rhs):
+        """Unify two records without recursion, and return their dict forms.
+
+        This is used for unification with recursion, and also in pattern
+        matching.
+
+        Args:
+            lhs (tuple): The first record value
+            rhs (tuple): The second record value
+
+        Returns:
+            dict: The dictionary representation of the first record
+            dict: The dictionary representation of the second record
+
+        """
+        if lhs[0] != "record" or rhs[0] != "record":
+            raise TypeError("Input arguments are not records")
+
+        if lhs[1] != rhs[1]:
+            raise UnificationError("Record literals do not match")
+
+        elif len(lhs[2]) != len(rhs[2]):
+            raise UnificationError("Record arities do not match")
+
+        else:
+            # Save into a record for matching record features
+            # independent of the order of the feature declaration.
+            lhs_record = {}
+            rhs_record = {}
+            for item in lhs[2]:
+                lhs_record[item[0]] = item[1]
+            for item in rhs[2]:
+                rhs_record[item[0]] = item[1]
+
+            if lhs_record.keys() != rhs_record.keys():
+                # Value returned by `dict.keys` acts like a set, so
+                # order doesn't matter.
+                raise UnificationError("Record features do not match")
+            else:
+                return lhs_record, rhs_record
+
     def _unify_vars(self, env, lhs, rhs):
         """Unify two variables."""
         eq_classes = []
         sas_vars = []
+
         for oper in [lhs, rhs]:
             if oper[0] == "ident":
                 sas_vars.append(env[oper[1]])
@@ -146,6 +188,7 @@ class Interpreter:
             else:  # SAS variable
                 sas_vars.append(oper[1])
                 eq_classes.append(self.sas[oper[1]])
+
         class1, class2 = eq_classes
         logging.debug(f"unifying: {sas_vars[0]} & {sas_vars[1]}")
 
@@ -190,46 +233,30 @@ class Interpreter:
             raise UnificationError("Numeric values do not match")
 
         elif lhs[0] == "record":
-            if lhs[1] != rhs[1]:
-                raise UnificationError("Record literals do not match")
-
-            elif len(lhs[2]) != len(rhs[2]):
-                raise UnificationError("Record arities do not match")
-
-            else:
-                # Save into a record for matching record features
-                # independent of the order of the feature declaration.
-                lhs_record = {}
-                rhs_record = {}
-                for item in lhs[2]:
-                    lhs_record[item[0]] = item[1]
-                for item in rhs[2]:
-                    rhs_record[item[0]] = item[1]
-
-                if lhs_record.keys() != rhs_record.keys():
-                    # Value returned by `dict.keys` acts like a set, so
-                    # order doesn't matter.
-                    raise UnificationError("Record features do not match")
-                else:
-                    for key in lhs_record:
-                        self._unify(env, lhs_record[key], rhs_record[key])
+            lhs_record, rhs_record = self._match_records(lhs, rhs)
+            for key in lhs_record:
+                self._unify(env, lhs_record[key], rhs_record[key])
 
     def _unify(self, env, lhs, rhs):
         """Unify both input variables/values."""
-        if lhs[0] == "ident" and rhs[0] == "ident":  # <x> = <y>
+        var_check = {"ident", "variable"}
+
+        if lhs[0] in var_check and rhs[0] in var_check:  # <x> = <y>
             self._unify_vars(env, lhs, rhs)
 
-        elif lhs[0] == "ident" or rhs[0] == "ident":  # <x> = <v>
+        elif lhs[0] in var_check or rhs[0] in var_check:  # <x> = <v>
             # Input can be either `<x> = <v>` or `<v> = <x>`, so convert it
             # into `<x> = <v>`.
             if lhs[0] == "ident":
+                var, value = env[lhs[1]], rhs
+            elif lhs[0] == "variable":
                 var, value = lhs[1], rhs
             else:
                 var, value = rhs[1], lhs
 
             value = self._compute(env, value)
-            class1 = self.sas[env[var]]
-            logging.debug(f"unifying {env[var]} and {value}")
+            class1 = self.sas[var]
+            logging.debug(f"unifying {var} and {value}")
 
             if not class1.is_bound():
                 class1.value = value
@@ -254,8 +281,7 @@ class Interpreter:
     def run(self, ast):
         """Run the given Oz AST."""
         self.sas = {}  # clear the interpreter
-        # Initialize with empty environments
-        stack = [(stmt, {}) for stmt in reversed(ast)]
+        stack = [(ast, {})]  # initialize with empty environment
 
         # TODO: Complete for all statement types
         while len(stack) > 0:
@@ -273,11 +299,10 @@ class Interpreter:
 
             elif stmt[0] == "var":
                 logging.info(f"local statement with var: {stmt[1][1]}")
-                new = self._alloc_var()
 
                 # Avoid editing environments of other statements in the stack
                 new_env = deepcopy(env)
-                new_env[stmt[1][1]] = new
+                new_env[stmt[1][1]] = self._alloc_var()
 
                 logging.debug(f"new env: {pformat(new_env)}")
                 logging.debug(f"sas: {pformat(self.sas)}")
@@ -286,6 +311,7 @@ class Interpreter:
             elif stmt[0] == "bind":
                 logging.info(f"binding lhs: {stmt[1]} & rhs: {stmt[2]}")
                 logging.debug(f"env: {pformat(env)}")
+                logging.debug(f"sas before: {pformat(self.sas)}")
                 self._unify(env, stmt[1], stmt[2])
                 logging.debug(f"sas after: {pformat(self.sas)}")
 
@@ -304,6 +330,42 @@ class Interpreter:
                         stack.append((stmt[2], env))
                     else:
                         stack.append((stmt[3], env))
+                else:
+                    raise Suspension(f"{ident} is unbound")
+
+            elif stmt[0] == "match":
+                ident = stmt[1][1]
+                logging.info(f"case on: {ident}")
+                eq_class = self.sas[env[ident]]
+
+                if stmt[2][0] != "record":
+                    raise TypeError(f"Invalid pattern: {stmt[2]}")
+
+                elif eq_class.is_bound():
+                    try:
+                        value, pattern = self._match_records(
+                            eq_class.value, stmt[2]
+                        )
+
+                    except (TypeError, UnificationError):
+                        # Either not a record, or doesn't match
+                        logging.debug(f"{ident} doesn't match pattern")
+                        stack.append((stmt[4], env))
+
+                    else:
+                        logging.debug(f"{ident} matches pattern")
+
+                        # Avoid editing environments of other statements in the
+                        # stack.
+                        new_env = deepcopy(env)
+                        for feat, item in pattern.items():
+                            if item[0] == "ident":
+                                new_env[item[1]] = self._alloc_var()
+                                self._unify(new_env, item, value[feat])
+                        logging.debug(f"env for case: {pformat(new_env)}")
+
+                        stack.append((stmt[3], new_env))
+
                 else:
                     raise Suspension(f"{ident} is unbound")
 

@@ -1,0 +1,14 @@
+[var ident(x) [
+    [
+        bind
+        ident(x)
+        [record literal(|) [[literal(1) literal(1)] [literal(2) ident(x)]]]
+    ]
+    [
+        match
+        ident(x)
+        [record literal(|) [[literal(1) ident(a)] [literal(2) ident(b)]]]
+        [bind ident(x) ident(b)]
+        [nop]
+    ]
+]]
