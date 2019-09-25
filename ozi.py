@@ -17,10 +17,6 @@ class UnificationError(Exception):
     """Exception for unification errors."""
 
 
-class UnboundVariableError(Exception):
-    """Exception for interpreter suspension due to unbound variables."""
-
-
 class _EqClass:
     """Equivalence class for the single-assignment store."""
 
@@ -45,7 +41,6 @@ class Interpreter:
         """Initialize the single-assignment store."""
         self.sas = {}
 
-    # TODO: Run Oz operations
     def _compute(self, env, value):
         """Compute the actual value of the given Oz "value"."""
         if type(value) in {Literal, Variable, Record, Proc}:  # already done
@@ -68,7 +63,31 @@ class Interpreter:
             ctx_env = {fvar: env[fvar] for fvar in fvars}
             return Proc(value[1], value[2], ctx_env)
 
-        else:  # Oz operations
+        elif value[0] in {"sum", "product"}:
+            operands = []
+            for oper in value[1:]:
+                if type(oper) is Ident:
+                    eq_class = self.sas[env[oper.name]]
+                    if eq_class.is_bound():
+                        oper_val = eq_class.value
+                    else:
+                        raise UnboundLocalError(f"{oper.name} is unbound")
+                else:
+                    oper_val = self._compute(env, oper)
+
+                if type(oper_val) is not Literal:
+                    raise TypeError(
+                        f"{value[0]} can only be performed over literals"
+                    )
+                else:
+                    operands.append(oper_val)
+
+            if value[0] == "sum":
+                return Literal(operands[0].value + operands[1].value)
+            else:
+                return Literal(operands[0].value * operands[1].value)
+
+        else:  # Misc. Oz operations
             raise NotImplementedError(f"{value}")
 
     # TODO: Complete for Oz operations
@@ -105,7 +124,13 @@ class Interpreter:
             fvars.difference_update(args)
             logging.debug(f"free vars of {value[0]}: {fvars}")
 
-        else:  # Oz operation
+        elif value[0] in {"sum", "product"}:
+            lhs = self.get_fvars_value(value[1])
+            rhs = self.get_fvars_value(value[2])
+            fvars = lhs.union(rhs)
+            logging.debug(f"free vars of {value[0]}: {fvars}")
+
+        else:  # Misc. Oz operation
             raise NotImplementedError(f"{value}")
 
         return fvars
@@ -323,7 +348,7 @@ class Interpreter:
         logging.info(f"if-else on: {ident}")
         eq_class = self.sas[env[ident]]
         if not eq_class.is_bound():
-            raise UnboundVariableError(f"{ident} is unbound")
+            raise UnboundLocalError(f"{ident} is unbound")
 
         cond = eq_class.value
         if type(cond) is not Literal or type(cond.value) is not bool:
@@ -357,7 +382,7 @@ class Interpreter:
             )
 
         if not eq_class.is_bound():
-            raise UnboundVariableError(f"{ident} is unbound")
+            raise UnboundLocalError(f"{ident} is unbound")
 
         try:
             self._match_records(eq_class.value, pattern)
@@ -397,7 +422,7 @@ class Interpreter:
         logging.info(f"calling: {proc}")
         eq_class = self.sas[env[proc]]
         if not eq_class.is_bound():
-            raise UnboundVariableError(f"{proc} is unbound")
+            raise UnboundLocalError(f"{proc} is unbound")
 
         value = eq_class.value
         if type(value) is not Proc:
