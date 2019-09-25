@@ -9,31 +9,48 @@ ast = [
             "var",
             Ident("y"),
             [
+                "var",
+                Ident("z"),
                 [
-                    "bind",
-                    Ident("x"),
-                    (
-                        "record",
-                        Literal("|"),
-                        [
-                            (Literal("1"), Literal(1)),
-                            (Literal("2"), Ident("y")),
-                        ],
-                    ),
+                    [
+                        "bind",
+                        Ident("x"),
+                        (
+                            "record",
+                            Literal("|"),
+                            [
+                                (Literal("1"), Literal(1)),
+                                (Literal("2"), Ident("y")),
+                            ],
+                        ),
+                    ],
+                    [
+                        "bind",
+                        Ident("y"),
+                        (
+                            "record",
+                            Literal("|"),
+                            [
+                                (Literal("1"), Literal(1)),
+                                (Literal("2"), Ident("x")),
+                            ],
+                        ),
+                    ],
+                    [
+                        "bind",
+                        Ident("z"),
+                        (
+                            "record",
+                            Literal("|"),
+                            [
+                                (Literal("1"), Literal(1)),
+                                (Literal("2"), Ident("z")),
+                            ],
+                        ),
+                    ],
+                    ["bind", Ident("x"), Ident("y")],
+                    ["bind", Ident("y"), Ident("z")],
                 ],
-                [
-                    "bind",
-                    Ident("y"),
-                    (
-                        "record",
-                        Literal("|"),
-                        [
-                            (Literal("1"), Literal(1)),
-                            (Literal("2"), Ident("x")),
-                        ],
-                    ),
-                ],
-                ["bind", Ident("x"), Ident("y")],
             ],
         ],
     ]

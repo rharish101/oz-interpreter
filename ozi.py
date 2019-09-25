@@ -194,9 +194,11 @@ class Interpreter:
                 sas_vars.append(env[oper.name])
             else:  # SAS variable
                 sas_vars.append(oper.name)
-        lhs, rhs = sas_vars
 
+        # overwriting the input arguments, as they are no longer required
+        lhs, rhs = sas_vars
         logging.debug(f"unifying: {lhs} & {rhs}")
+
         if rhs == marked.get(lhs, "") or lhs == marked.get(rhs, ""):
             logging.debug(
                 f"ignoring unification as {lhs} & {rhs} are marked unified"
