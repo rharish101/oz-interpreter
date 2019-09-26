@@ -12,7 +12,7 @@ The goal is to build an interpreter for the kernel language of the [Oz](https://
 ```
 ./run.py name_of_testcase
 ```
-For example, if you want to use the testcase "testcases/conditionals.py":
+For example, if you want to use the testcase "testcases/conditionals_1.py":
 ```
-./run.py conditionals
+./run.py conditionals_1
 ```

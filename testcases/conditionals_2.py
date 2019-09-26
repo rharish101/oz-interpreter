@@ -1,3 +1,4 @@
+"""Another testcase for Oz conditionals."""
 from ozi import Ident, Literal
 
 ast = [

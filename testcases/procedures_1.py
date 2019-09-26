@@ -1,6 +1,25 @@
+"""Another testcase for Oz procedures."""
 from ozi import Ident, Literal
 
-ast = (
+# local X in
+#     local Y in
+#         local D in
+#             Y=2
+#             D=3
+#             X=proc{$ K A}
+#                 if K then A=Y else A=D end
+#             end
+#         end
+#     end
+#     local Y in
+#         local B in
+#             Y=true
+#             {X Y B}
+#         end
+#     end
+# end
+
+ast = [
     [
         "var",
         Ident("x"),
@@ -44,22 +63,5 @@ ast = (
                 ],
             ],
         ],
-    ],
-)
-
-# local X in
-#    local Y in
-#      local D in
-#        Y=2
-#        D=3
-#        X=proc{$ K A}
-#            if K then A=Y else A=D end
-#          end
-#      end
-#    end
-#    local Y in
-#      local B in
-#        Y=true
-#        {X Y B}
-#      end
-#    end
+    ]
+]
