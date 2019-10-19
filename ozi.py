@@ -5,6 +5,7 @@ import string
 from collections import namedtuple
 from copy import deepcopy
 from pprint import pformat
+from queue import Queue
 
 Literal = namedtuple("Literal", ["value"])
 Ident = namedtuple("Identifier", ["name"])
@@ -15,6 +16,15 @@ Proc = namedtuple("Procedure", ["args", "contents", "ctxenv"])
 
 class UnificationError(Exception):
     """Exception for unification errors."""
+
+
+class UnboundVariableError(Exception):
+    """Exception for unbound variables."""
+
+    def __init__(self, message, var):
+        """Store the variable that is unbound."""
+        super().__init__(message)
+        self.var = var
 
 
 class _EqClass:
@@ -32,6 +42,16 @@ class _EqClass:
     def is_bound(self):
         """Return True if the variables in this class are bound to a value."""
         return self.value is not None
+
+
+class _Thread:
+    """Class for threads with editable attributes."""
+
+    def __init__(self, num, stack):
+        """Create a thread."""
+        self.num = num
+        self.stack = stack
+        self.suspension = None
 
 
 class Interpreter:
@@ -71,7 +91,9 @@ class Interpreter:
                     if eq_class.is_bound():
                         oper_val = eq_class.value
                     else:
-                        raise UnboundLocalError(f"{oper.name} is unbound")
+                        raise UnboundVariableError(
+                            f"{oper.name} is unbound", env[oper.name]
+                        )
                 else:
                     oper_val = self._compute(env, oper)
 
@@ -90,7 +112,6 @@ class Interpreter:
         else:  # Misc. Oz operations
             raise NotImplementedError(f"{value}")
 
-    # TODO: Complete for Oz operations
     def get_fvars_value(self, value):
         """Get the free variables of an Oz variable or value/operation.
 
@@ -348,7 +369,7 @@ class Interpreter:
         logging.info(f"if-else on: {ident}")
         eq_class = self.sas[env[ident]]
         if not eq_class.is_bound():
-            raise UnboundLocalError(f"{ident} is unbound")
+            raise UnboundVariableError(f"{ident} is unbound", env[ident])
 
         cond = eq_class.value
         if type(cond) is not Literal or type(cond.value) is not bool:
@@ -372,7 +393,10 @@ class Interpreter:
         """
         ident = stmt[1].name
         logging.info(f"case on: {ident}")
+
         eq_class = self.sas[env[ident]]
+        if not eq_class.is_bound():
+            raise UnboundVariableError(f"{ident} is unbound", env[ident])
 
         if stmt[2][0] != "record":
             raise TypeError(f"Invalid pattern: {stmt[2]}")
@@ -380,9 +404,6 @@ class Interpreter:
             pattern = Record(
                 stmt[2][1], {feat: val for feat, val in stmt[2][2]}
             )
-
-        if not eq_class.is_bound():
-            raise UnboundLocalError(f"{ident} is unbound")
 
         try:
             self._match_records(eq_class.value, pattern)
@@ -422,7 +443,7 @@ class Interpreter:
         logging.info(f"calling: {proc}")
         eq_class = self.sas[env[proc]]
         if not eq_class.is_bound():
-            raise UnboundLocalError(f"{proc} is unbound")
+            raise UnboundVariableError(f"{proc} is unbound", env[proc])
 
         value = eq_class.value
         if type(value) is not Proc:
@@ -438,52 +459,94 @@ class Interpreter:
 
         return value.contents, new_env
 
+    def _exec_stmt(self, stack, stmt, env):
+        """Process an Oz statement."""
+        if stmt[0] == "nop":
+            logging.info("skip statement")
+
+        elif type(stmt[0]) is list:
+            logging.info(f"combined statement of {len(stmt)} sub-statements")
+            for sub_stmt in reversed(stmt):
+                stack.append((sub_stmt, env))
+
+        elif stmt[0] == "var":
+            logging.info(f"local statement with var: {stmt[1].name}")
+
+            # Avoid editing envs of other statements in the stack
+            new_env = deepcopy(env)
+            new_env[stmt[1].name] = self._alloc_var()
+
+            logging.debug(f"new env: {pformat(new_env)}")
+            logging.debug(f"sas: {pformat(self.sas)}")
+            stack.append((stmt[2], new_env))
+
+        elif stmt[0] == "bind":
+            logging.info(f"binding lhs: {stmt[1]} & rhs: {stmt[2]}")
+            logging.debug(f"env: {pformat(env)}")
+            logging.debug(f"sas before: {pformat(self.sas)}")
+            self.unify(env, stmt[1], stmt[2])
+            logging.debug(f"sas after: {pformat(self.sas)}")
+
+        elif stmt[0] == "conditional":
+            # The environment doesn't change, so this function is
+            # made to not return the environment.
+            stack.append((self._if_stmt(stmt, env), env))
+
+        elif stmt[0] == "match":
+            stack.append(self._match_stmt(stmt, env))
+
+        elif stmt[0] == "apply":
+            stack.append(self._apply_stmt(stmt, env))
+
+        else:
+            raise ValueError(f"{stmt} is an invalid statement")
+
     def run(self, ast):
         """Run the given Oz AST."""
         self.sas = {}  # clear the interpreter
-        stack = [(ast, {})]  # initialize with empty environment
+        thr_queue = Queue()
+        thr_count = 0  # for debugging
 
-        while len(stack) > 0:
-            stmt, env = stack.pop()
+        # Initialize the main thread with an empty env
+        thr_queue.put(_Thread(thr_count, [(ast, {})]))
+        thr_count += 1
 
-            if stmt[0] == "nop":
-                logging.info("skip statement")
+        # TODO: Check for deadlock, ie., all threads are indefinitely suspended
+        while not thr_queue.empty():
+            thread = thr_queue.get()
+            logging.debug(f"processing thread: {thread.num}")
 
-            elif type(stmt[0]) is list:
+            if thread.suspension is not None:
+                # Checking if thread can be resumed
                 logging.info(
-                    f"combined statement with {len(stmt)} sub-statements"
+                    f"thread {thread.num} suspended on: {thread.suspension}"
                 )
-                for sub_stmt in reversed(stmt):
-                    stack.append((sub_stmt, env))
-
-            elif stmt[0] == "var":
-                logging.info(f"local statement with var: {stmt[1].name}")
-
-                # Avoid editing environments of other statements in the stack
-                new_env = deepcopy(env)
-                new_env[stmt[1].name] = self._alloc_var()
-
-                logging.debug(f"new env: {pformat(new_env)}")
                 logging.debug(f"sas: {pformat(self.sas)}")
-                stack.append((stmt[2], new_env))
+                eq_class = self.sas[thread.suspension]
+                if not eq_class.is_bound():
+                    thr_queue.put(thread)
+                    continue
 
-            elif stmt[0] == "bind":
-                logging.info(f"binding lhs: {stmt[1]} & rhs: {stmt[2]}")
-                logging.debug(f"env: {pformat(env)}")
-                logging.debug(f"sas before: {pformat(self.sas)}")
-                self.unify(env, stmt[1], stmt[2])
-                logging.debug(f"sas after: {pformat(self.sas)}")
+            stmt, env = thread.stack.pop()
 
-            elif stmt[0] == "conditional":
-                # The environment doesn't change, so this function is made to
-                # not return the environment.
-                stack.append((self._if_stmt(stmt, env), env))
-
-            elif stmt[0] == "match":
-                stack.append(self._match_stmt(stmt, env))
-
-            elif stmt[0] == "apply":
-                stack.append(self._apply_stmt(stmt, env))
+            if stmt[0] == "thread":
+                logging.info(f"creating new thread with no: {thr_count}")
+                thr_queue.put(_Thread(thr_count, [(stmt[1], env)]))
+                thr_count += 1
 
             else:
-                raise ValueError(f"{stmt} is an invalid statement")
+                try:
+                    self._exec_stmt(thread.stack, stmt, env)
+                except UnboundVariableError as ex:
+                    logging.info(f"thread {thread.num} suspended on: {ex.var}")
+                    thread.suspension = ex.var
+                    # Restore the popped stmt and env.
+                    # NOTE: This assumes that no state (stack, env or sas)
+                    # was altered before detecting the unbound variable
+                    thread.stack.append((stmt, env))
+
+            if len(thread.stack) > 0:
+                logging.debug(f"thread {thread.num} is incomplete")
+                thr_queue.put(thread)
+            else:
+                logging.debug(f"thread {thread.num} is complete")
