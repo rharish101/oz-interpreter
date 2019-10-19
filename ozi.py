@@ -1,7 +1,5 @@
 """Interpreter for the Oz kernel language's AST."""
 import logging
-import random
-import string
 from collections import namedtuple
 from copy import deepcopy
 from pprint import pformat
@@ -59,7 +57,7 @@ class Interpreter:
 
     def __init__(self):
         """Initialize the single-assignment store."""
-        self.sas = {}
+        self.sas = []
 
     def _compute(self, env, value):
         """Compute the actual value of the given Oz "value"."""
@@ -344,15 +342,9 @@ class Interpreter:
 
     def _alloc_var(self, length=16):
         """Allocate a variable on the single-assignment store and return it."""
-        while True:
-            # Choose a random string made of ASCII alphanumeric characters of a
-            # certain length.
-            new = "".join(
-                random.choices(string.ascii_letters + string.digits, k=length)
-            )
-            if new not in self.sas:
-                self.sas[new] = _EqClass(new)
-                return new
+        new = len(self.sas)
+        self.sas.append(_EqClass(new))
+        return new
 
     def _if_stmt(self, stmt, env):
         """Process a suspendable Oz if-else statement.
@@ -503,7 +495,7 @@ class Interpreter:
 
     def run(self, ast):
         """Run the given Oz AST."""
-        self.sas = {}  # clear the interpreter
+        self.sas = []  # clear the interpreter
         thr_queue = Queue()
         thr_count = 0  # for debugging
 
