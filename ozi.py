@@ -498,6 +498,7 @@ class Interpreter:
         self.sas = []  # clear the interpreter
         thr_queue = Queue()
         thr_count = 0  # for debugging
+        is_deadlock = False
 
         # Initialize the main thread with an empty env
         thr_queue.put(_Thread(thr_count, [(ast, {})]))
@@ -516,19 +517,26 @@ class Interpreter:
                 logging.debug(f"sas: {pformat(self.sas)}")
                 eq_class = self.sas[thread.suspension]
                 if not eq_class.is_bound():
+                    if is_deadlock:
+                        logging.debug(f"Deadlock encountered")
+                        break
+                    is_deadlock = True
                     thr_queue.put(thread)
                     continue
 
             stmt, env = thread.stack.pop()
 
             if stmt[0] == "thread":
+                is_deadlock = False
                 logging.info(f"creating new thread with no: {thr_count}")
                 thr_queue.put(_Thread(thr_count, [(stmt[1], env)]))
                 thr_count += 1
 
             else:
                 try:
+                    is_deadlock = False
                     self._exec_stmt(thread.stack, stmt, env)
+                    is_deadlock = False
                 except UnboundVariableError as ex:
                     logging.info(f"thread {thread.num} suspended on: {ex.var}")
                     thread.suspension = ex.var
@@ -541,4 +549,5 @@ class Interpreter:
                 logging.debug(f"thread {thread.num} is incomplete")
                 thr_queue.put(thread)
             else:
+                is_deadlock = False
                 logging.debug(f"thread {thread.num} is complete")
