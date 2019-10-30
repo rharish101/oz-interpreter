@@ -50,7 +50,7 @@ class _Thread:
         self.num = num
         self.stack = stack
         self.suspension = None
-
+        self.tick = 0
 
 class Interpreter:
     """The Oz interpreter."""
@@ -498,15 +498,17 @@ class Interpreter:
         self.sas = []  # clear the interpreter
         thr_queue = Queue()
         thr_count = 0  # for debugging
-        is_deadlock = False
-
         # Initialize the main thread with an empty env
         thr_queue.put(_Thread(thr_count, [(ast, {})]))
         thr_count += 1
-
+        global_tick = 0
+        change_tick = 0
         # TODO: Check for deadlock, ie., all threads are indefinitely suspended
         while not thr_queue.empty():
+            global_tick += 1
             thread = thr_queue.get()
+            old_tick = thread.tick 
+            thread.tick = global_tick
             logging.debug(f"processing thread: {thread.num}")
 
             if thread.suspension is not None:
@@ -517,26 +519,24 @@ class Interpreter:
                 logging.debug(f"sas: {pformat(self.sas)}")
                 eq_class = self.sas[thread.suspension]
                 if not eq_class.is_bound():
-                    if is_deadlock:
-                        logging.debug(f"Deadlock encountered")
-                        break
-                    is_deadlock = True
+                    if change_tick < old_tick:
+                        logging.info("Deadlock encountered") 
+                        return 
                     thr_queue.put(thread)
                     continue
 
             stmt, env = thread.stack.pop()
 
             if stmt[0] == "thread":
-                is_deadlock = False
+                is_running = True
                 logging.info(f"creating new thread with no: {thr_count}")
                 thr_queue.put(_Thread(thr_count, [(stmt[1], env)]))
-                thr_count += 1
+                change_tick = global_tick 
 
             else:
                 try:
-                    is_deadlock = False
                     self._exec_stmt(thread.stack, stmt, env)
-                    is_deadlock = False
+                    change_tick = global_tick
                 except UnboundVariableError as ex:
                     logging.info(f"thread {thread.num} suspended on: {ex.var}")
                     thread.suspension = ex.var
@@ -549,5 +549,4 @@ class Interpreter:
                 logging.debug(f"thread {thread.num} is incomplete")
                 thr_queue.put(thread)
             else:
-                is_deadlock = False
                 logging.debug(f"thread {thread.num} is complete")
