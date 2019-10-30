@@ -8,14 +8,8 @@ ast = [
         "var",
         Ident("y"),
         [
-            [
-                "thread",
-                [
-                    ["nop"],
-                    ["nop"],
-                    ["bind", Ident("x"), ["sum", Ident("y"), Literal(2)]],
-                ],
-            ],
+            ["thread", ["bind", Ident("x"), ["sum", Ident("y"), Literal(2)]]],
+            ["thread", [["nop"], ["nop"], ["bind", Ident("x"), Literal(5)]]],
             ["bind", Ident("y"), ["product", Ident("x"), Literal(3)]],
         ],
     ],
