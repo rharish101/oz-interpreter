@@ -10,7 +10,7 @@ ast = [
         [
             ["thread", ["bind", Ident("y"), ["sum", Ident("y"), Literal(0)]]],
             ["thread", [["nop"], ["nop"], ["bind", Ident("x"), Literal(5)]]],
-            ["bind", Ident("y"), ["product", Ident("x"), Literal(3)]],
+            ["bind", Ident("y"), ["product", Ident("y"), Literal(1)]],
         ],
     ],
 ]

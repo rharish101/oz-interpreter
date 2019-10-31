@@ -16,6 +16,10 @@ class UnificationError(Exception):
     """Exception for unification errors."""
 
 
+class DeadlockError(Exception):
+    """Exception for deadlocks."""
+
+
 class UnboundVariableError(Exception):
     """Exception for unbound variables."""
 
@@ -51,6 +55,7 @@ class _Thread:
         self.stack = stack
         self.suspension = None
         self.tick = 0
+
 
 class Interpreter:
     """The Oz interpreter."""
@@ -507,7 +512,7 @@ class Interpreter:
         while not thr_queue.empty():
             global_tick += 1
             thread = thr_queue.get()
-            old_tick = thread.tick 
+            old_tick = thread.tick
             thread.tick = global_tick
             logging.debug(f"processing thread: {thread.num}")
 
@@ -520,18 +525,16 @@ class Interpreter:
                 eq_class = self.sas[thread.suspension]
                 if not eq_class.is_bound():
                     if change_tick < old_tick:
-                        logging.info("Deadlock encountered") 
-                        return 
+                        raise DeadlockError
                     thr_queue.put(thread)
                     continue
 
             stmt, env = thread.stack.pop()
 
             if stmt[0] == "thread":
-                is_running = True
                 logging.info(f"creating new thread with no: {thr_count}")
                 thr_queue.put(_Thread(thr_count, [(stmt[1], env)]))
-                change_tick = global_tick 
+                change_tick = global_tick
 
             else:
                 try:
