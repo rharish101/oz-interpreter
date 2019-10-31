@@ -51,10 +51,10 @@ class _Thread:
 
     def __init__(self, num, stack):
         """Create a thread."""
-        self.num = num
+        self.num = num  # kept for debugging purposes
         self.stack = stack
-        self.suspension = None
-        self.tick = 0
+        self.suspension = None  # the variable this thread is suspended on
+        self.tick = 0  # time when this thread was last checked/updated
 
 
 class Interpreter:
@@ -503,12 +503,14 @@ class Interpreter:
         self.sas = []  # clear the interpreter
         thr_queue = Queue()
         thr_count = 0  # for debugging
+
         # Initialize the main thread with an empty env
         thr_queue.put(_Thread(thr_count, [(ast, {})]))
         thr_count += 1
-        global_tick = 0
+
+        global_tick = 0  # time counter
         change_tick = 0
-        # TODO: Check for deadlock, ie., all threads are indefinitely suspended
+
         while not thr_queue.empty():
             global_tick += 1
             thread = thr_queue.get()
@@ -525,6 +527,10 @@ class Interpreter:
                 eq_class = self.sas[thread.suspension]
                 if not eq_class.is_bound():
                     if change_tick < old_tick:
+                        # Last change in the multi-stack is before this thread
+                        # was last checked. Thus, this thread is appearing
+                        # for the second time after the last change in the
+                        # multi-stack.
                         raise DeadlockError
                     thr_queue.put(thread)
                     continue
@@ -539,7 +545,6 @@ class Interpreter:
             else:
                 try:
                     self._exec_stmt(thread.stack, stmt, env)
-                    change_tick = global_tick
                 except UnboundVariableError as ex:
                     logging.info(f"thread {thread.num} suspended on: {ex.var}")
                     thread.suspension = ex.var
@@ -547,6 +552,8 @@ class Interpreter:
                     # NOTE: This assumes that no state (stack, env or sas)
                     # was altered before detecting the unbound variable
                     thread.stack.append((stmt, env))
+                else:
+                    change_tick = global_tick
 
             if len(thread.stack) > 0:
                 logging.debug(f"thread {thread.num} is incomplete")
