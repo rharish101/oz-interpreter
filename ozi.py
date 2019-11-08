@@ -525,7 +525,9 @@ class Interpreter:
                 )
                 logging.debug(f"sas: {pformat(self.sas)}")
                 eq_class = self.sas[thread.suspension]
-                if not eq_class.is_bound():
+                if eq_class.is_bound():
+                    thread.suspension = None
+                else:
                     if change_tick < old_tick:
                         # Last change in the multi-stack is before this thread
                         # was last checked. Thus, this thread is appearing
@@ -541,6 +543,7 @@ class Interpreter:
                 logging.info(f"creating new thread with no: {thr_count}")
                 thr_queue.put(_Thread(thr_count, [(stmt[1], env)]))
                 change_tick = global_tick
+                thr_count += 1
 
             else:
                 try:
