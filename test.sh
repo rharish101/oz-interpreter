@@ -9,6 +9,7 @@ for i in testcases/*.py; do
         testcase="${filename%.*}"
         ./run.py -v "$testcase" &>/dev/null
         if (( $? == 0 )); then
+            echo "$testcase: passed"
             ((pass++))
         else
             echo "$testcase: failed"
