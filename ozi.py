@@ -109,8 +109,10 @@ class Interpreter:
 
             if value[0] == "sum":
                 return Literal(operands[0].value + operands[1].value)
-            else:
+            elif value[0] == "product":
                 return Literal(operands[0].value * operands[1].value)
+            else:
+                raise RuntimeError(f"Invalid operator in: {value}")
 
         else:  # Misc. Oz operations
             raise NotImplementedError(f"{value}")
